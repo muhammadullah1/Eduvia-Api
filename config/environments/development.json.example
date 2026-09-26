@@ -1,0 +1,14 @@
+{
+  "env": "development",
+  "port": 5000,
+  "db": {
+    "host": "127.0.0.1",
+    "name": "creative_leaders_db",
+    "username": "your_db_user",
+    "password": "your_db_password",
+    "port": "5432"
+  },
+  "signInJwtSecret": "change-me-eduvia-jwt-secret",
+  "frontEndUrl": "http://localhost:5173",
+  "appVersion": "1.0.0"
+}
