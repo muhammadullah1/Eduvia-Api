@@ -16,6 +16,10 @@ const attendanceRouter = require("./attendance");
 const feeRouter = require("./fee");
 const examRouter = require("./exam");
 const timetableRouter = require("./timetable");
+const teacherAbsenceRouter = require("./teacher_absence");
+const dailyLessonRouter = require("./daily_lesson");
+const dailyTestRouter = require("./daily_test");
+const monthlyTestRouter = require("./monthly_test");
 
 const router = express.Router();
 
@@ -34,5 +38,9 @@ router.use("/attendances", attendanceRouter);
 router.use("/fees", feeRouter);
 router.use("/exams", examRouter);
 router.use("/timetable", timetableRouter);
+router.use("/teacher-absences", teacherAbsenceRouter);
+router.use("/daily-lessons", dailyLessonRouter);
+router.use("/daily-tests", dailyTestRouter);
+router.use("/monthly-tests", monthlyTestRouter);
 
 module.exports = router;

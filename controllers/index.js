@@ -15,4 +15,8 @@ module.exports = {
   feeController: require("./fee"),
   examController: require("./exam"),
   timetableController: require("./timetable"),
+  teacherAbsenceController: require("./teacher_absence"),
+  dailyLessonController: require("./daily_lesson"),
+  dailyTestController: require("./daily_test"),
+  monthlyTestController: require("./monthly_test"),
 };

@@ -18,6 +18,8 @@ module.exports = (sequelize, DataTypes) => {
         defaultValue: "Pending",
       },
       paidOn: { type: DataTypes.DATEONLY, allowNull: true, field: "paid_on" },
+      dueDate: { type: DataTypes.DATEONLY, allowNull: true, field: "due_date" },
+      notes: { type: DataTypes.TEXT, allowNull: true },
     },
     {
       tableName: "fee_payments",

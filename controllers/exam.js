@@ -42,7 +42,11 @@ module.exports = {
   },
   submit: async (req, res, next) => {
     try {
-      const data = await examService.setStatus(req.params.id, req.user.schoolId, SHEET_STATUS.SUBMITTED);
+      const data = await examService.setStatus(
+        req.params.id,
+        req.user.schoolId,
+        SHEET_STATUS.SUBMITTED,
+      );
       res.status(200).json({ success: true, message: "Submitted", data });
     } catch (err) {
       next(err);
@@ -50,7 +54,11 @@ module.exports = {
   },
   verify: async (req, res, next) => {
     try {
-      const data = await examService.setStatus(req.params.id, req.user.schoolId, SHEET_STATUS.VERIFIED);
+      const data = await examService.setStatus(
+        req.params.id,
+        req.user.schoolId,
+        SHEET_STATUS.VERIFIED,
+      );
       res.status(200).json({ success: true, message: "Verified", data });
     } catch (err) {
       next(err);
@@ -58,8 +66,20 @@ module.exports = {
   },
   publish: async (req, res, next) => {
     try {
-      const data = await examService.setStatus(req.params.id, req.user.schoolId, SHEET_STATUS.PUBLISHED);
-      res.status(200).json({ success: true, message: "Published", data });
+      const data = await examService.publish(req.params.id, req.user.schoolId);
+      res.status(200).json({ success: true, message: "Published (fee gate applied)", data });
+    } catch (err) {
+      next(err);
+    }
+  },
+  overrideFeeGate: async (req, res, next) => {
+    try {
+      const data = await examService.overrideFeeGate(req.params.id, req.user.schoolId, {
+        studentId: req.body.studentId,
+        reason: req.body.reason,
+        userId: req.user.id,
+      });
+      res.status(200).json({ success: true, message: "Fee gate overridden", data });
     } catch (err) {
       next(err);
     }

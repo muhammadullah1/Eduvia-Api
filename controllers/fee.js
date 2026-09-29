@@ -19,4 +19,16 @@ module.exports = {
       next(err);
     }
   },
+  updateStatus: async (req, res, next) => {
+    try {
+      const data = await feeService.updateStatus(
+        req.params.id,
+        req.user.schoolId,
+        req.body.status,
+      );
+      res.status(200).json({ success: true, message: "Payment status updated", data });
+    } catch (err) {
+      next(err);
+    }
+  },
 };

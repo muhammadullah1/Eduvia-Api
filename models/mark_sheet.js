@@ -21,6 +21,13 @@ module.exports = (sequelize, DataTypes) => {
         defaultValue: 100,
         field: "max_score",
       },
+      feePeriod: { type: DataTypes.STRING, allowNull: true, field: "fee_period" },
+      passPercent: {
+        type: DataTypes.DECIMAL(5, 2),
+        allowNull: false,
+        defaultValue: 40,
+        field: "pass_percent",
+      },
     },
     {
       tableName: "mark_sheets",

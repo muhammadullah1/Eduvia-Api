@@ -24,9 +24,24 @@ module.exports = {
       const data = await teacherService.assignSubjects(
         req.params.id,
         req.user.schoolId,
-        req.body.subjectIds,
+        {
+          subjectIds: req.body.subjectIds,
+          primarySubjectId: req.body.primarySubjectId,
+        },
       );
       res.status(200).json({ success: true, message: "Subjects assigned", data });
+    } catch (err) {
+      next(err);
+    }
+  },
+  assignPrimarySubject: async (req, res, next) => {
+    try {
+      const data = await teacherService.assignPrimarySubject(
+        req.params.id,
+        req.user.schoolId,
+        req.body.primarySubjectId,
+      );
+      res.status(200).json({ success: true, message: "Primary subject updated", data });
     } catch (err) {
       next(err);
     }

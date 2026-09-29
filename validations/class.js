@@ -10,6 +10,7 @@ module.exports = {
       section: Joi.string().required(),
       label: Joi.string().required(),
       room: Joi.string().allow("", null),
+      periodCount: Joi.number().integer().min(1).max(16).default(8),
     }),
   },
   validateUpdate: {
@@ -19,6 +20,7 @@ module.exports = {
       section: Joi.string(),
       label: Joi.string(),
       room: Joi.string().allow("", null),
+      periodCount: Joi.number().integer().min(1).max(16),
     }).min(1),
   },
   validateId: {

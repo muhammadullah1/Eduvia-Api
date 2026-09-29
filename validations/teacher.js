@@ -6,7 +6,14 @@ module.exports = {
   validateAssignSubjects: {
     params: Joi.object({ id: Joi.number().integer().required() }),
     body: Joi.object({
-      subjectIds: Joi.array().items(Joi.number().integer()).required(),
+      subjectIds: Joi.array().items(Joi.number().integer()).default([]),
+      primarySubjectId: Joi.number().integer().allow(null),
+    }),
+  },
+  validateAssignPrimarySubject: {
+    params: Joi.object({ id: Joi.number().integer().required() }),
+    body: Joi.object({
+      primarySubjectId: Joi.number().integer().allow(null).required(),
     }),
   },
   validateAssignClasses: {

@@ -4,7 +4,7 @@ const express = require("express");
 const router = express.Router();
 const { timetableController } = require("../controllers");
 const { authorizeRoles } = require("../middlewares/authorize_roles");
-const { USER_ROLES } = require("../constants");
+const { USER_ROLES, MGMT_ROLES } = require("../constants");
 const validate = require("../middlewares/validate");
 const {
   validateList,
@@ -13,8 +13,8 @@ const {
   validateId,
 } = require("../validations/timetable");
 
-const all = [USER_ROLES.MANAGEMENT, USER_ROLES.TEACHER, USER_ROLES.PARENT];
-const mgmt = [USER_ROLES.MANAGEMENT];
+const all = [...MGMT_ROLES, USER_ROLES.TEACHER, USER_ROLES.PARENT];
+const mgmt = MGMT_ROLES;
 
 router.get("/", authorizeRoles(all), validate(validateList), timetableController.list);
 router.post("/", authorizeRoles(mgmt), validate(validateCreate), timetableController.create);

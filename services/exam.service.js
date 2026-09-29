@@ -1,7 +1,12 @@
 "use strict";
 
-const { MarkSheets, MarkSheetRows, Students, sequelize } = require("../models");
-const { SHEET_STATUS } = require("../constants");
+const {
+  MarkSheets,
+  MarkSheetRows,
+  FeePayments,
+  sequelize,
+} = require("../models");
+const { SHEET_STATUS, PAYMENT_STATUS } = require("../constants");
 const ApiError = require("../utils/ApiError");
 
 async function list(schoolId, { classId, status } = {}) {
@@ -64,7 +69,60 @@ async function updateRows(id, schoolId, rows) {
   });
 }
 
+async function studentHasPaidFee(schoolId, studentId, feePeriod) {
+  if (!feePeriod) return true;
+  const paid = await FeePayments.findOne({
+    where: {
+      fkSchoolId: schoolId,
+      fkStudentId: studentId,
+      period: feePeriod,
+      status: PAYMENT_STATUS.PAID,
+    },
+  });
+  return Boolean(paid);
+}
+
+/**
+ * Publish with fee gate:
+ * - If fee_period is set, unpaid students are blocked (visibleToParent=false, blockedByFee=true)
+ *   unless manualOverride is already set.
+ * - Sheet status still becomes Published; parents only see rows with visibleToParent=true.
+ */
+async function publish(id, schoolId) {
+  const sheet = await getById(id, schoolId);
+  if (sheet.status !== SHEET_STATUS.VERIFIED && sheet.status !== SHEET_STATUS.PUBLISHED) {
+    // allow Verified → Published; also idempotent republish to re-evaluate gates
+    if (sheet.status !== SHEET_STATUS.VERIFIED) {
+      throw new ApiError(400, "Only verified sheets can be published");
+    }
+  }
+  return sequelize.transaction(async (t) => {
+    for (const row of sheet.rows) {
+      if (row.manualOverride) {
+        await row.update(
+          { blockedByFee: false, visibleToParent: true },
+          { transaction: t },
+        );
+        continue;
+      }
+      const feeOk = await studentHasPaidFee(schoolId, row.fkStudentId, sheet.feePeriod);
+      await row.update(
+        {
+          blockedByFee: !feeOk,
+          visibleToParent: feeOk,
+        },
+        { transaction: t },
+      );
+    }
+    await sheet.update({ status: SHEET_STATUS.PUBLISHED }, { transaction: t });
+    return getById(id, schoolId);
+  });
+}
+
 async function setStatus(id, schoolId, status) {
+  if (status === SHEET_STATUS.PUBLISHED) {
+    return publish(id, schoolId);
+  }
   const allowed = Object.values(SHEET_STATUS);
   if (!allowed.includes(status)) throw new ApiError(400, "Invalid sheet status");
   const sheet = await getById(id, schoolId);
@@ -72,4 +130,30 @@ async function setStatus(id, schoolId, status) {
   return getById(id, schoolId);
 }
 
-module.exports = { list, getById, create, updateRows, setStatus };
+async function overrideFeeGate(sheetId, schoolId, { studentId, reason, userId }) {
+  if (!reason || !String(reason).trim()) {
+    throw new ApiError(400, "Override reason is required");
+  }
+  const sheet = await getById(sheetId, schoolId);
+  const row = sheet.rows.find((r) => r.fkStudentId === Number(studentId));
+  if (!row) throw new ApiError(404, "Mark sheet row not found for student");
+  await row.update({
+    manualOverride: true,
+    overrideReason: String(reason).trim(),
+    overrideByUserId: userId,
+    blockedByFee: false,
+    visibleToParent: sheet.status === SHEET_STATUS.PUBLISHED,
+  });
+  return getById(sheetId, schoolId);
+}
+
+module.exports = {
+  list,
+  getById,
+  create,
+  updateRows,
+  setStatus,
+  publish,
+  overrideFeeGate,
+  studentHasPaidFee,
+};

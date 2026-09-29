@@ -16,4 +16,8 @@ module.exports = {
   examService: require("./exam.service"),
   timetableService: require("./timetable.service"),
   auditService: require("./audit.service"),
+  teacherAbsenceService: require("./teacher_absence.service"),
+  dailyLessonService: require("./daily_lesson.service"),
+  dailyTestService: require("./daily_test.service"),
+  monthlyTestService: require("./monthly_test.service"),
 };

@@ -16,6 +16,7 @@ async function list(schoolId) {
     where: { fkSchoolId: schoolId },
     include: [
       { model: Users, as: "user", attributes: { exclude: ["password"] } },
+      { model: Subjects, as: "primarySubject" },
       { model: Subjects, as: "subjects", through: { attributes: [] } },
       { model: Classes, as: "classes", through: { attributes: [] } },
     ],
@@ -28,6 +29,7 @@ async function getById(id, schoolId) {
     where: { id, fkSchoolId: schoolId },
     include: [
       { model: Users, as: "user", attributes: { exclude: ["password"] } },
+      { model: Subjects, as: "primarySubject" },
       { model: Subjects, as: "subjects", through: { attributes: [] } },
       { model: Classes, as: "classes", through: { attributes: [] } },
     ],
@@ -36,17 +38,41 @@ async function getById(id, schoolId) {
   return row;
 }
 
-async function assignSubjects(teacherId, schoolId, subjectIds = []) {
+/**
+ * Prefer one-teacher-one-subject. Still editable:
+ * - primarySubjectId sets the canonical subject
+ * - subjectIds (optional) syncs the join table; defaults to [primarySubjectId]
+ */
+async function assignSubjects(teacherId, schoolId, { subjectIds, primarySubjectId } = {}) {
   const teacher = await getById(teacherId, schoolId);
+  let ids = Array.isArray(subjectIds) ? subjectIds.filter(Boolean) : [];
+  const primary = primarySubjectId ?? ids[0] ?? null;
+
+  if (primary != null && !ids.includes(primary)) {
+    ids = [primary, ...ids];
+  }
+  // Default policy: keep a single subject when only primary is provided
+  if (primary != null && (!subjectIds || subjectIds.length === 0)) {
+    ids = [primary];
+  }
+
   return sequelize.transaction(async (t) => {
+    await teacher.update({ fkPrimarySubjectId: primary }, { transaction: t });
     await TeacherSubjects.destroy({ where: { fkTeacherId: teacher.id }, transaction: t });
-    if (subjectIds.length) {
+    if (ids.length) {
       await TeacherSubjects.bulkCreate(
-        subjectIds.map((fkSubjectId) => ({ fkTeacherId: teacher.id, fkSubjectId })),
+        ids.map((fkSubjectId) => ({ fkTeacherId: teacher.id, fkSubjectId })),
         { transaction: t },
       );
     }
     return getById(teacherId, schoolId);
+  });
+}
+
+async function assignPrimarySubject(teacherId, schoolId, primarySubjectId) {
+  return assignSubjects(teacherId, schoolId, {
+    primarySubjectId,
+    subjectIds: primarySubjectId ? [primarySubjectId] : [],
   });
 }
 
@@ -64,4 +90,10 @@ async function assignClasses(teacherId, schoolId, classIds = []) {
   });
 }
 
-module.exports = { list, getById, assignSubjects, assignClasses };
+module.exports = {
+  list,
+  getById,
+  assignSubjects,
+  assignPrimarySubject,
+  assignClasses,
+};

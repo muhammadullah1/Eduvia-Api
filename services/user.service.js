@@ -57,7 +57,7 @@ async function listBySchool(schoolId, { role, page = 1, pageSize = 20 } = {}) {
 
 async function createStaffUser(schoolId, payload) {
   const { firstName, lastName, email, phone, password, role, gender, employeeCode } = payload;
-  if (![USER_ROLES.MANAGEMENT, USER_ROLES.TEACHER].includes(role)) {
+  if (![USER_ROLES.MANAGEMENT, USER_ROLES.CONTROLLER, USER_ROLES.ACCOUNTANT, USER_ROLES.TEACHER].includes(role)) {
     throw new ApiError(400, "Only management or teacher users can be created here");
   }
   const existing = await findByEmail(email.toLowerCase());

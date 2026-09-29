@@ -4,7 +4,7 @@ const express = require("express");
 const router = express.Router();
 const { applicationController } = require("../controllers");
 const { authorizeRoles } = require("../middlewares/authorize_roles");
-const { USER_ROLES } = require("../constants");
+const { USER_ROLES, MGMT_ROLES } = require("../constants");
 const validate = require("../middlewares/validate");
 const {
   validateCreate,
@@ -14,7 +14,7 @@ const {
   validateId,
 } = require("../validations/application");
 
-const mgmt = [USER_ROLES.MANAGEMENT];
+const mgmt = MGMT_ROLES;
 
 router.get("/", authorizeRoles(mgmt), applicationController.list);
 router.get("/:id", authorizeRoles(mgmt), validate(validateId), applicationController.getById);

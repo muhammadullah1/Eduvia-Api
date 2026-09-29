@@ -4,13 +4,13 @@ const express = require("express");
 const router = express.Router();
 const { studentController } = require("../controllers");
 const { authorizeRoles } = require("../middlewares/authorize_roles");
-const { USER_ROLES } = require("../constants");
+const { USER_ROLES, MGMT_ROLES } = require("../constants");
 const validate = require("../middlewares/validate");
 const { validateCreate, validateUpdate, validateId } = require("../validations/student");
 
-const all = [USER_ROLES.MANAGEMENT, USER_ROLES.TEACHER, USER_ROLES.PARENT];
-const staff = [USER_ROLES.MANAGEMENT, USER_ROLES.TEACHER];
-const mgmt = [USER_ROLES.MANAGEMENT];
+const all = [...MGMT_ROLES, USER_ROLES.TEACHER, USER_ROLES.PARENT, USER_ROLES.ACCOUNTANT];
+const staff = [...MGMT_ROLES, USER_ROLES.TEACHER];
+const mgmt = MGMT_ROLES;
 
 router.get("/", authorizeRoles(all), studentController.list);
 router.get("/:id", authorizeRoles(all), validate(validateId), studentController.getById);

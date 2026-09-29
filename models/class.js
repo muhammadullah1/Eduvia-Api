@@ -11,6 +11,12 @@ module.exports = (sequelize, DataTypes) => {
       section: { type: DataTypes.STRING, allowNull: false },
       label: { type: DataTypes.STRING, allowNull: false },
       room: { type: DataTypes.STRING, allowNull: true },
+      periodCount: {
+        type: DataTypes.INTEGER,
+        allowNull: false,
+        defaultValue: 8,
+        field: "period_count",
+      },
     },
     {
       tableName: "classes",
@@ -29,6 +35,8 @@ module.exports = (sequelize, DataTypes) => {
     Class.hasMany(models.Students, { foreignKey: "fkClassId", as: "students" });
     Class.hasMany(models.Attendances, { foreignKey: "fkClassId", as: "attendances" });
     Class.hasMany(models.TimetableSlots, { foreignKey: "fkClassId", as: "slots" });
+    Class.hasMany(models.DailyLessons, { foreignKey: "fkClassId", as: "dailyLessons" });
+    Class.hasMany(models.TeacherAbsences, { foreignKey: "fkClassId", as: "teacherAbsences" });
     Class.belongsToMany(models.Teachers, {
       through: models.TeacherClasses,
       foreignKey: "fkClassId",
