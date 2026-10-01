@@ -10,6 +10,9 @@ module.exports = (sequelize, DataTypes) => {
       actorLabel: { type: DataTypes.STRING, allowNull: false, field: "actor_label" },
       action: { type: DataTypes.STRING, allowNull: false },
       at: { type: DataTypes.DATE, allowNull: false },
+      entityType: { type: DataTypes.STRING(64), allowNull: true, field: "entity_type" },
+      entityId: { type: DataTypes.INTEGER, allowNull: true, field: "entity_id" },
+      metadata: { type: DataTypes.JSONB, allowNull: true },
     },
     {
       tableName: "audit_logs",

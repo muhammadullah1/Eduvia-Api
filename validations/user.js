@@ -12,13 +12,13 @@ module.exports = {
       phone: Joi.string().allow("", null),
       password: Joi.string().min(8).required(),
       role: Joi.string()
-        .valid(
-          USER_ROLES.MANAGEMENT,
-          USER_ROLES.CONTROLLER,
-          USER_ROLES.ACCOUNTANT,
-          USER_ROLES.TEACHER,
-        )
+        .valid(USER_ROLES.SUPER_ADMIN, USER_ROLES.OPERATIONS_MANAGER, USER_ROLES.ACCOUNTANT, USER_ROLES.TEACHER)
         .required(),
+      subjectId: Joi.number().integer().when("role", {
+        is: USER_ROLES.TEACHER,
+        then: Joi.required(),
+        otherwise: Joi.forbidden(),
+      }),
       gender: Joi.string().valid("Male", "Female", "Other").allow(null),
       employeeCode: Joi.string().allow("", null),
     }),

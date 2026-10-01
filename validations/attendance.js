@@ -1,18 +1,19 @@
 "use strict";
 
 const Joi = require("joi");
+const { isoDay } = require("./common");
 
 module.exports = {
   validateList: {
     query: Joi.object({
-      classId: Joi.number().integer().required(),
-      date: Joi.date().iso().required(),
+      classId: Joi.number().integer(),
+      date: isoDay,
     }),
   },
   validateMark: {
     body: Joi.object({
       classId: Joi.number().integer().required(),
-      date: Joi.date().iso().required(),
+      date: isoDay.required(),
       marks: Joi.array()
         .items(
           Joi.object({

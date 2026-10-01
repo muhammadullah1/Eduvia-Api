@@ -1,42 +1,15 @@
 "use strict";
 
 const { teacherAbsenceService } = require("../services");
+const { handle } = require("../utils/handler");
 
 module.exports = {
-  list: async (req, res, next) => {
-    try {
-      const data = await teacherAbsenceService.list(req.user.schoolId, req.query);
-      res.status(200).json({ success: true, message: "Teacher absences", data });
-    } catch (err) {
-      next(err);
-    }
-  },
-  create: async (req, res, next) => {
-    try {
-      const data = await teacherAbsenceService.create(req.user.schoolId, req.body);
-      res.status(201).json({ success: true, message: "Absence recorded", data });
-    } catch (err) {
-      next(err);
-    }
-  },
-  update: async (req, res, next) => {
-    try {
-      const data = await teacherAbsenceService.update(
-        req.params.id,
-        req.user.schoolId,
-        req.body,
-      );
-      res.status(200).json({ success: true, message: "Absence updated", data });
-    } catch (err) {
-      next(err);
-    }
-  },
-  remove: async (req, res, next) => {
-    try {
-      await teacherAbsenceService.remove(req.params.id, req.user.schoolId);
-      res.status(200).json({ success: true, message: "Absence removed" });
-    } catch (err) {
-      next(err);
-    }
-  },
+  list: handle("Teacher absences", (req) => teacherAbsenceService.list(req.user.schoolId, req.query)),
+  markAbsent: handle("Absence recorded", (req) => teacherAbsenceService.markAbsent(req.user, req.body), 201),
+  availableSubstitutes: handle("Available substitutes", (req) =>
+    teacherAbsenceService.availableSubstitutes(req.user.schoolId, req.params.id),
+  ),
+  assignSubstitute: handle("Substitute assigned", (req) => teacherAbsenceService.assignSubstitute(req.user, req.params.id, req.body)),
+  removeSubstitute: handle("Substitute removed", (req) => teacherAbsenceService.removeSubstitute(req.user, req.params.id)),
+  cancel: handle("Absence cancelled", (req) => teacherAbsenceService.cancel(req.user, req.params.id)),
 };

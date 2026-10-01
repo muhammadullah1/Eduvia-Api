@@ -1,19 +1,14 @@
 "use strict";
 
 const express = require("express");
-const router = express.Router();
-const { userController } = require("../controllers");
-const { authorizeRoles } = require("../middlewares/authorize_roles");
-const { USER_ROLES, MGMT_ROLES } = require("../constants");
+const { authorize } = require("../middlewares/authorize");
 const validate = require("../middlewares/validate");
-const { validateCreate } = require("../validations/user");
+const { userController: c } = require("../controllers");
+const v = require("../validations/user");
 
-router.get("/", authorizeRoles(MGMT_ROLES), userController.list);
-router.post(
-  "/",
-  authorizeRoles(MGMT_ROLES),
-  validate(validateCreate),
-  userController.create,
-);
+const router = express.Router();
+
+router.get("/", authorize("users.read"), c.list);
+router.post("/", authorize("users.create"), validate(v.validateCreate), c.create);
 
 module.exports = router;

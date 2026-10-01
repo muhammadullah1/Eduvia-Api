@@ -1,87 +1,21 @@
 "use strict";
 
 const { examService } = require("../services");
-const { SHEET_STATUS } = require("../constants");
+const { handle } = require("../utils/handler");
 
 module.exports = {
-  list: async (req, res, next) => {
-    try {
-      const data = await examService.list(req.user.schoolId, req.query);
-      res.status(200).json({ success: true, message: "Mark sheets", data });
-    } catch (err) {
-      next(err);
-    }
-  },
-  getById: async (req, res, next) => {
-    try {
-      const data = await examService.getById(req.params.id, req.user.schoolId);
-      res.status(200).json({ success: true, message: "Mark sheet", data });
-    } catch (err) {
-      next(err);
-    }
-  },
-  create: async (req, res, next) => {
-    try {
-      const data = await examService.create(req.user.schoolId, req.body);
-      res.status(201).json({ success: true, message: "Mark sheet created", data });
-    } catch (err) {
-      next(err);
-    }
-  },
-  updateRows: async (req, res, next) => {
-    try {
-      const data = await examService.updateRows(
-        req.params.id,
-        req.user.schoolId,
-        req.body.rows,
-      );
-      res.status(200).json({ success: true, message: "Rows updated", data });
-    } catch (err) {
-      next(err);
-    }
-  },
-  submit: async (req, res, next) => {
-    try {
-      const data = await examService.setStatus(
-        req.params.id,
-        req.user.schoolId,
-        SHEET_STATUS.SUBMITTED,
-      );
-      res.status(200).json({ success: true, message: "Submitted", data });
-    } catch (err) {
-      next(err);
-    }
-  },
-  verify: async (req, res, next) => {
-    try {
-      const data = await examService.setStatus(
-        req.params.id,
-        req.user.schoolId,
-        SHEET_STATUS.VERIFIED,
-      );
-      res.status(200).json({ success: true, message: "Verified", data });
-    } catch (err) {
-      next(err);
-    }
-  },
-  publish: async (req, res, next) => {
-    try {
-      const data = await examService.publish(req.params.id, req.user.schoolId);
-      res.status(200).json({ success: true, message: "Published (fee gate applied)", data });
-    } catch (err) {
-      next(err);
-    }
-  },
-  overrideFeeGate: async (req, res, next) => {
-    try {
-      const data = await examService.overrideFeeGate(req.params.id, req.user.schoolId, {
-        studentId: req.body.studentId,
-        reason: req.body.reason,
-        userId: req.user.id,
-      });
-      res.status(200).json({ success: true, message: "Fee gate overridden", data });
-    } catch (err) {
-      next(err);
-    }
-  },
+  list: handle("Exams", (req) => examService.list(req.user, req.query)),
+  getById: handle("Exam", (req) => examService.getExam(req.user, req.params.id)),
+  create: handle("Exam created", (req) => examService.create(req.user, req.body), 201),
+  getSheet: handle("Mark sheet", (req) => examService.getSheet(req.user, req.params.sheetId)),
+  updateRows: handle("Scores saved", (req) => examService.updateRows(req.user, req.params.sheetId, req.body.rows)),
+  submit: handle("Sheet submitted", (req) => examService.transition(req.user, req.params.sheetId, "submit")),
+  verify: handle("Sheet verified", (req) => examService.transition(req.user, req.params.sheetId, "verify")),
+  publish: handle("Sheet published", (req) => examService.transition(req.user, req.params.sheetId, "publish")),
+  reopen: handle("Sheet reopened", (req) => examService.transition(req.user, req.params.sheetId, "reopen")),
+  gateStatus: handle("Result visibility", (req) => examService.gateStatus(req.user, req.params.id)),
+  listOverrides: handle("Result overrides", (req) => examService.listOverrides(req.user, req.query)),
+  grantOverride: handle("Result released", (req) => examService.grantOverride(req.user, req.params.id, req.body), 201),
+  revokeOverride: handle("Override revoked", (req) => examService.revokeOverride(req.user, req.params.overrideId)),
+  parentResults: handle("Results", (req) => examService.parentResults(req.user, req.query.studentId)),
 };

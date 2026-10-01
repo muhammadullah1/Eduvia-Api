@@ -74,4 +74,14 @@ async function linkStudent(parentId, schoolId, studentId, isPrimary = false) {
   return link;
 }
 
-module.exports = { list, createWithUser, linkStudent };
+/** The signed-in parent's linked children (§12). */
+async function myChildren(user) {
+  const parent = await Parents.findOne({
+    where: { fkUserId: user.id, fkSchoolId: user.schoolId },
+    include: [{ model: Students, as: "students", through: { attributes: ["isPrimary"] } }],
+  });
+  if (!parent) throw new ApiError(404, "Parent profile not found");
+  return parent.students;
+}
+
+module.exports = { myChildren, list, createWithUser, linkStudent };

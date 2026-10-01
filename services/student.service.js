@@ -3,11 +3,17 @@
 const { Students, Classes, Parents, Users } = require("../models");
 const ApiError = require("../utils/ApiError");
 
-async function list(schoolId, { classId, status, page = 1, pageSize = 50 } = {}) {
+/**
+ * `scope` narrows rows for restricted roles: parents get their linked
+ * children only, teachers the classes they teach (see access.service).
+ */
+async function list(schoolId, { classId, status, page = 1, pageSize = 50 } = {}, scope = {}) {
   const where = { fkSchoolId: schoolId };
   if (classId) where.fkClassId = classId;
+  if (scope.studentIds) where.id = scope.studentIds;
+  if (scope.classIds) where.fkClassId = classId ? scope.classIds.filter((id) => id === Number(classId)) : scope.classIds;
   if (status) where.status = status;
-  const limit = Math.min(Number(pageSize) || 50, 200);
+  const limit = Math.min(Number(pageSize) || 50, 1000);
   const offset = (Math.max(Number(page) || 1, 1) - 1) * limit;
   const { rows, count } = await Students.findAndCountAll({
     where,

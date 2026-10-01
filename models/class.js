@@ -17,6 +17,12 @@ module.exports = (sequelize, DataTypes) => {
         defaultValue: 8,
         field: "period_count",
       },
+      monthlyFee: {
+        type: DataTypes.DECIMAL(12, 2),
+        allowNull: false,
+        defaultValue: 0,
+        field: "monthly_fee",
+      },
     },
     {
       tableName: "classes",
@@ -37,6 +43,7 @@ module.exports = (sequelize, DataTypes) => {
     Class.hasMany(models.TimetableSlots, { foreignKey: "fkClassId", as: "slots" });
     Class.hasMany(models.DailyLessons, { foreignKey: "fkClassId", as: "dailyLessons" });
     Class.hasMany(models.TeacherAbsences, { foreignKey: "fkClassId", as: "teacherAbsences" });
+    Class.hasMany(models.PlannedChapters, { foreignKey: "fkClassId", as: "plannedChapters" });
     Class.belongsToMany(models.Teachers, {
       through: models.TeacherClasses,
       foreignKey: "fkClassId",

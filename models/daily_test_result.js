@@ -12,6 +12,7 @@ module.exports = (sequelize, DataTypes) => {
       },
       fkStudentId: { type: DataTypes.INTEGER, allowNull: false, field: "fk_student_id" },
       score: { type: DataTypes.DECIMAL(8, 2), allowNull: true },
+      fkEnteredByUserId: { type: DataTypes.INTEGER, allowNull: true, field: "fk_entered_by_user_id" },
     },
     {
       tableName: "daily_test_results",

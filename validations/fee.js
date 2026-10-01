@@ -1,27 +1,31 @@
 "use strict";
 
 const Joi = require("joi");
+const { id, idParam, isoDay, isoMonth } = require("./common");
+const { PAYMENT_STATUS } = require("../constants");
 
 module.exports = {
-  validateCreate: {
+  validateId: idParam,
+  validateGenerate: { body: Joi.object({ month: isoMonth.required(), classId: id }) },
+  validateMonths: { query: Joi.object({ studentId: id }) },
+  validateList: {
+    query: Joi.object({ studentId: id, date: isoDay, status: Joi.string().valid(...Object.values(PAYMENT_STATUS)) }),
+  },
+  validateRecord: {
     body: Joi.object({
-      fkStudentId: Joi.number().integer().required(),
-      period: Joi.string().required(),
-      type: Joi.string().required(),
-      amount: Joi.number().positive().required(),
-      method: Joi.string().allow("", null),
-      status: Joi.string().valid("Paid", "Pending").default("Pending"),
-      paidOn: Joi.date().iso().allow(null),
-      date: Joi.date().iso().allow(null),
-      dueDate: Joi.date().iso().allow(null),
-      notes: Joi.string().allow("", null),
-      ref: Joi.string().allow("", null),
+      studentId: id.required(),
+      amount: Joi.number().positive().precision(2).required(),
+      paidOn: isoDay,
+      method: Joi.string().valid("Cash", "Bank transfer", "Cheque", "Online").default("Cash"),
+      feeType: Joi.string().max(64).default("Tuition"),
+      notes: Joi.string().max(500).allow("", null),
+      idempotencyKey: Joi.string().max(128),
+      allocations: Joi.array()
+        .items(Joi.object({ feeMonthId: id.required(), amount: Joi.number().positive().precision(2).required() }))
+        .min(1),
     }),
   },
-  validateStatus: {
-    params: Joi.object({ id: Joi.number().integer().required() }),
-    body: Joi.object({
-      status: Joi.string().valid("Paid", "Pending").required(),
-    }),
-  },
+  validateDay: { query: Joi.object({ date: isoDay }) },
+  validateCollections: { query: Joi.object({ date: isoDay, recordedBy: id }) },
+  validateSummary: { query: Joi.object({ month: isoMonth }) },
 };

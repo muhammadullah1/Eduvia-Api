@@ -16,13 +16,7 @@ module.exports = (sequelize, DataTypes) => {
       gender: { type: DataTypes.ENUM("Male", "Female", "Other"), allowNull: true },
       photo: { type: DataTypes.STRING, allowNull: true },
       role: {
-        type: DataTypes.ENUM(
-          USER_ROLES.MANAGEMENT,
-          USER_ROLES.CONTROLLER,
-          USER_ROLES.ACCOUNTANT,
-          USER_ROLES.TEACHER,
-          USER_ROLES.PARENT,
-        ),
+        type: DataTypes.ENUM(...Object.values(USER_ROLES)),
         allowNull: false,
       },
       status: {

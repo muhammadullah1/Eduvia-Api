@@ -1,28 +1,23 @@
 "use strict";
 
 const express = require("express");
-const router = express.Router();
-const { dailyTestController } = require("../controllers");
-const { authorizeRoles } = require("../middlewares/authorize_roles");
-const { USER_ROLES, MGMT_ROLES } = require("../constants");
+const { authorize } = require("../middlewares/authorize");
 const validate = require("../middlewares/validate");
-const {
-  validateCreate,
-  validateResults,
-  validateId,
-} = require("../validations/daily_test");
+const { dailyTestController: c } = require("../controllers");
+const v = require("../validations/daily_test");
 
-const staff = [...MGMT_ROLES, USER_ROLES.TEACHER];
-const all = [...staff, USER_ROLES.PARENT];
+const router = express.Router();
+const schedule = authorize("tests.schedule");
 
-router.get("/", authorizeRoles(all), dailyTestController.list);
-router.get("/:id", authorizeRoles(all), validate(validateId), dailyTestController.getById);
-router.post("/", authorizeRoles(staff), validate(validateCreate), dailyTestController.create);
-router.patch(
-  "/:id/results",
-  authorizeRoles(staff),
-  validate(validateResults),
-  dailyTestController.updateResults,
-);
+router.get("/schedules", authorize("tests.read"), validate(v.validateScheduleList), c.listSchedules);
+router.put("/schedules", schedule, validate(v.validateSchedule), c.saveSchedule);
+router.delete("/schedules/:id", schedule, validate(v.validateId), c.deactivateSchedule);
+router.post("/generate", schedule, validate(v.validateGenerate), c.generateMonth);
+router.get("/monthly-summary", authorize("tests.read"), validate(v.validateSummary), c.monthlySummary);
+router.get("/flagged", schedule, validate(v.validateFlagged), c.flagged);
+router.get("/", authorize("tests.read"), validate(v.validateList), c.list);
+router.get("/:id", authorize("tests.marks"), validate(v.validateId), c.getById);
+router.put("/:id/marks", authorize("tests.marks"), validate(v.validateMarks), c.saveMarks);
+router.post("/:id/publish", authorize("tests.publish"), validate(v.validateId), c.publish);
 
 module.exports = router;

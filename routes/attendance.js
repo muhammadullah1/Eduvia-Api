@@ -1,17 +1,14 @@
 "use strict";
 
 const express = require("express");
-const router = express.Router();
-const { attendanceController } = require("../controllers");
-const { authorizeRoles } = require("../middlewares/authorize_roles");
-const { USER_ROLES, MGMT_ROLES } = require("../constants");
+const { authorize } = require("../middlewares/authorize");
 const validate = require("../middlewares/validate");
-const { validateList, validateMark } = require("../validations/attendance");
+const { attendanceController: c } = require("../controllers");
+const v = require("../validations/attendance");
 
-const staff = [...MGMT_ROLES, USER_ROLES.TEACHER];
-const all = [...MGMT_ROLES, USER_ROLES.TEACHER, USER_ROLES.PARENT];
+const router = express.Router();
 
-router.get("/", authorizeRoles(all), validate(validateList), attendanceController.list);
-router.post("/mark", authorizeRoles(staff), validate(validateMark), attendanceController.mark);
+router.get("/", authorize("attendance.read"), validate(v.validateList), c.list);
+router.post("/mark", authorize("attendance.mark"), validate(v.validateMark), c.mark);
 
 module.exports = router;

@@ -1,19 +1,14 @@
 "use strict";
 
 const express = require("express");
-const router = express.Router();
-const { authController } = require("../controllers");
-const { authorizeRoles } = require("../middlewares/authorize_roles");
-const { USER_ROLES, MGMT_ROLES, FEE_ROLES } = require("../constants");
+const { authorize } = require("../middlewares/authorize");
 const validate = require("../middlewares/validate");
-const { validateLogin, validateChangePassword } = require("../validations/auth");
+const { authController: c } = require("../controllers");
+const v = require("../validations/auth");
 
-router.post("/login", validate(validateLogin), authController.signIn);
-router.post(
-  "/change-password",
-  authorizeRoles([...MGMT_ROLES, USER_ROLES.ACCOUNTANT, USER_ROLES.TEACHER, USER_ROLES.PARENT]),
-  validate(validateChangePassword),
-  authController.updatePassword,
-);
+const router = express.Router();
+
+router.post("/login", validate(v.validateLogin), c.signIn);
+router.post("/change-password", authorize("account.self"), validate(v.validateChangePassword), c.updatePassword);
 
 module.exports = router;

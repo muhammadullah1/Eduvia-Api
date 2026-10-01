@@ -1,33 +1,29 @@
 "use strict";
 
 const Joi = require("joi");
+const { id, idParam, isoDay, period } = require("./common");
+const { ABSENCE_STATUS } = require("../constants");
 
 module.exports = {
-  validateCreate: {
-    body: Joi.object({
-      fkTeacherId: Joi.number().integer().required(),
-      fkClassId: Joi.number().integer().required(),
-      fkTimetableSlotId: Joi.number().integer().allow(null),
-      date: Joi.date().iso().required(),
-      periodIndex: Joi.number().integer().min(1).required(),
-      status: Joi.string()
-        .valid("Absent", "Covered", "Cancelled", "Unmanaged")
-        .default("Absent"),
-      fkCoverTeacherId: Joi.number().integer().allow(null),
-      notes: Joi.string().allow("", null),
+  validateId: idParam,
+  validateList: {
+    query: Joi.object({
+      date: isoDay,
+      teacherId: id,
+      status: Joi.string().valid(...Object.values(ABSENCE_STATUS)),
     }),
   },
-  validateUpdate: {
-    params: Joi.object({ id: Joi.number().integer().required() }),
+  validateMarkAbsent: {
     body: Joi.object({
-      status: Joi.string().valid("Absent", "Covered", "Cancelled", "Unmanaged"),
-      fkCoverTeacherId: Joi.number().integer().allow(null),
-      notes: Joi.string().allow("", null),
-      periodIndex: Joi.number().integer().min(1),
-      date: Joi.date().iso(),
-    }).min(1),
+      teacherId: id.required(),
+      date: isoDay.required(),
+      periods: Joi.array().items(period).min(1),
+      fullDay: Joi.boolean().default(false),
+      notes: Joi.string().max(500).allow("", null),
+    }).or("periods", "fullDay"),
   },
-  validateId: {
-    params: Joi.object({ id: Joi.number().integer().required() }),
+  validateAssign: {
+    ...idParam,
+    body: Joi.object({ substituteTeacherId: id.required(), notes: Joi.string().max(500).allow("", null) }),
   },
 };

@@ -1,22 +1,17 @@
 "use strict";
 
 const express = require("express");
-const router = express.Router();
-const { dailyLessonController } = require("../controllers");
-const { authorizeRoles } = require("../middlewares/authorize_roles");
-const { USER_ROLES, MGMT_ROLES } = require("../constants");
+const { authorize } = require("../middlewares/authorize");
 const validate = require("../middlewares/validate");
-const {
-  validateCreate,
-  validateUpdate,
-  validateId,
-} = require("../validations/daily_lesson");
+const { dailyLessonController: c } = require("../controllers");
+const v = require("../validations/daily_lesson");
 
-const staff = [...MGMT_ROLES, USER_ROLES.TEACHER];
+const router = express.Router();
 
-router.get("/", authorizeRoles(staff), dailyLessonController.list);
-router.post("/", authorizeRoles(staff), validate(validateCreate), dailyLessonController.create);
-router.patch("/:id", authorizeRoles(staff), validate(validateUpdate), dailyLessonController.update);
-router.delete("/:id", authorizeRoles(MGMT_ROLES), validate(validateId), dailyLessonController.remove);
+router.get("/", authorize("lessons.read"), validate(v.validateList), c.list);
+router.post("/", authorize("lessons.write"), validate(v.validateCreate), c.create);
+router.patch("/:id", authorize("lessons.write"), validate(v.validateUpdate), c.update);
+router.post("/:id/review", authorize("lessons.review"), validate(v.validateReview), c.review);
+router.delete("/:id", authorize("lessons.review"), validate(v.validateId), c.remove);
 
 module.exports = router;

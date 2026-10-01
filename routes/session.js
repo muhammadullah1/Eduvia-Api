@@ -1,20 +1,18 @@
 "use strict";
 
 const express = require("express");
-const router = express.Router();
-const { sessionController } = require("../controllers");
-const { authorizeRoles } = require("../middlewares/authorize_roles");
-const { USER_ROLES, MGMT_ROLES } = require("../constants");
+const { authorize } = require("../middlewares/authorize");
 const validate = require("../middlewares/validate");
-const { validateCreate, validateUpdate, validateId } = require("../validations/session");
+const { sessionController: c } = require("../controllers");
+const v = require("../validations/session");
 
-const all = [...MGMT_ROLES, USER_ROLES.TEACHER, USER_ROLES.PARENT];
-const mgmt = MGMT_ROLES;
+const router = express.Router();
+const manage = authorize("academic.manage");
 
-router.get("/", authorizeRoles(all), sessionController.list);
-router.post("/", authorizeRoles(mgmt), validate(validateCreate), sessionController.create);
-router.patch("/:id", authorizeRoles(mgmt), validate(validateId), validate(validateUpdate), sessionController.update);
-router.post("/:id/activate", authorizeRoles(mgmt), validate(validateId), sessionController.activate);
-router.delete("/:id", authorizeRoles(mgmt), validate(validateId), sessionController.remove);
+router.get("/", authorize("academic.read"), c.list);
+router.post("/", manage, validate(v.validateCreate), c.create);
+router.patch("/:id", manage, validate(v.validateId), validate(v.validateUpdate), c.update);
+router.post("/:id/activate", manage, validate(v.validateId), c.activate);
+router.delete("/:id", manage, validate(v.validateId), c.remove);
 
 module.exports = router;

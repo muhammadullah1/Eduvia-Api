@@ -1,21 +1,18 @@
 "use strict";
 
 const express = require("express");
-const router = express.Router();
-const { studentController } = require("../controllers");
-const { authorizeRoles } = require("../middlewares/authorize_roles");
-const { USER_ROLES, MGMT_ROLES } = require("../constants");
+const { authorize } = require("../middlewares/authorize");
 const validate = require("../middlewares/validate");
-const { validateCreate, validateUpdate, validateId } = require("../validations/student");
+const { studentController: c } = require("../controllers");
+const v = require("../validations/student");
 
-const all = [...MGMT_ROLES, USER_ROLES.TEACHER, USER_ROLES.PARENT, USER_ROLES.ACCOUNTANT];
-const staff = [...MGMT_ROLES, USER_ROLES.TEACHER];
-const mgmt = MGMT_ROLES;
+const router = express.Router();
+const manage = authorize("students.manage");
 
-router.get("/", authorizeRoles(all), studentController.list);
-router.get("/:id", authorizeRoles(all), validate(validateId), studentController.getById);
-router.post("/", authorizeRoles(mgmt), validate(validateCreate), studentController.create);
-router.patch("/:id", authorizeRoles(staff), validate(validateId), validate(validateUpdate), studentController.update);
-router.delete("/:id", authorizeRoles(mgmt), validate(validateId), studentController.remove);
+router.get("/", authorize("students.read"), c.list);
+router.get("/:id", authorize("students.read"), validate(v.validateId), c.getById);
+router.post("/", manage, validate(v.validateCreate), c.create);
+router.patch("/:id", manage, validate(v.validateId), validate(v.validateUpdate), c.update);
+router.delete("/:id", manage, validate(v.validateId), c.remove);
 
 module.exports = router;

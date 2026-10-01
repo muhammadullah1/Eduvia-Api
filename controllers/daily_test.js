@@ -1,42 +1,17 @@
 "use strict";
 
 const { dailyTestService } = require("../services");
+const { handle } = require("../utils/handler");
 
 module.exports = {
-  list: async (req, res, next) => {
-    try {
-      const data = await dailyTestService.list(req.user.schoolId, req.query);
-      res.status(200).json({ success: true, message: "Daily tests", data });
-    } catch (err) {
-      next(err);
-    }
-  },
-  getById: async (req, res, next) => {
-    try {
-      const data = await dailyTestService.getById(req.params.id, req.user.schoolId);
-      res.status(200).json({ success: true, message: "Daily test", data });
-    } catch (err) {
-      next(err);
-    }
-  },
-  create: async (req, res, next) => {
-    try {
-      const data = await dailyTestService.create(req.user.schoolId, req.body);
-      res.status(201).json({ success: true, message: "Daily test created", data });
-    } catch (err) {
-      next(err);
-    }
-  },
-  updateResults: async (req, res, next) => {
-    try {
-      const data = await dailyTestService.updateResults(
-        req.params.id,
-        req.user.schoolId,
-        req.body.results,
-      );
-      res.status(200).json({ success: true, message: "Daily test results updated", data });
-    } catch (err) {
-      next(err);
-    }
-  },
+  listSchedules: handle("Weekly test schedules", (req) => dailyTestService.listSchedules(req.user.schoolId, req.query)),
+  saveSchedule: handle("Weekly test day saved", (req) => dailyTestService.saveSchedule(req.user, req.body)),
+  deactivateSchedule: handle("Schedule removed", (req) => dailyTestService.deactivateSchedule(req.user, req.params.id)),
+  generateMonth: handle("Tests generated", (req) => dailyTestService.generateMonth(req.user, req.body), 201),
+  list: handle("Weekly tests", (req) => dailyTestService.list(req.user, req.query)),
+  getById: handle("Weekly test", (req) => dailyTestService.getForStaff(req.user, req.params.id)),
+  saveMarks: handle("Marks saved", (req) => dailyTestService.saveMarks(req.user, req.params.id, req.body.marks)),
+  publish: handle("Marks published", (req) => dailyTestService.publish(req.user, req.params.id)),
+  monthlySummary: handle("Monthly subject summary", (req) => dailyTestService.monthlySummary(req.user, req.query)),
+  flagged: handle("Flagged for follow-up", (req) => dailyTestService.flagged(req.user, req.query)),
 };

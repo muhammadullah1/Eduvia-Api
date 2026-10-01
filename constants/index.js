@@ -6,25 +6,14 @@ exports.PLATFORMS = {
 };
 
 exports.USER_ROLES = {
-  MANAGEMENT: "management",
-  CONTROLLER: "controller",
+  SUPER_ADMIN: "super_admin",
+  OPERATIONS_MANAGER: "operations_manager",
   ACCOUNTANT: "accountant",
   TEACHER: "teacher",
   PARENT: "parent",
 };
 
-/** Roles with full school oversight (management + controller). */
-exports.MGMT_ROLES = [
-  exports.USER_ROLES.MANAGEMENT,
-  exports.USER_ROLES.CONTROLLER,
-];
-
-/** Roles that can manage fees (management + accountant + controller). */
-exports.FEE_ROLES = [
-  exports.USER_ROLES.MANAGEMENT,
-  exports.USER_ROLES.ACCOUNTANT,
-  exports.USER_ROLES.CONTROLLER,
-];
+exports.ALL_ROLES = Object.values(exports.USER_ROLES);
 
 exports.USER_STATUS = {
   ACTIVE: "active",
@@ -84,16 +73,28 @@ exports.GENDER = {
 };
 
 exports.ABSENCE_STATUS = {
-  ABSENT: "Absent",
+  PENDING: "Pending",
   COVERED: "Covered",
   CANCELLED: "Cancelled",
-  UNMANAGED: "Unmanaged",
+  NO_CLASS: "NoClass",
 };
 
 exports.LESSON_STATUS = {
   PLANNED: "Planned",
   IN_PROGRESS: "In progress",
   COMPLETED: "Completed",
+};
+
+exports.LESSON_REVIEW_STATUS = {
+  SUBMITTED: "Submitted",
+  APPROVED: "Approved",
+  REJECTED: "Rejected",
+};
+
+exports.DAILY_TEST_STATUS = {
+  SCHEDULED: "Scheduled",
+  MARKS_ENTERED: "MarksEntered",
+  PUBLISHED: "Published",
 };
 
 exports.MONTHLY_RESULT_STATUS = {
@@ -103,13 +104,55 @@ exports.MONTHLY_RESULT_STATUS = {
   FAILED: "Failed",
 };
 
-/** Monthly test rules (documented defaults). */
-exports.MONTHLY_TEST_RULES = {
-  PASS_PERCENT: 40,
-  LOW_MARKS_CEILING_PERCENT: 55,
-  FAIL_TEST_COUNT: 2,
-  LOW_MARKS_PASS_COUNT: 3,
+exports.FEE_MONTH_STATUS = {
+  UNPAID: "Unpaid",
+  PARTIALLY_PAID: "Partially Paid",
+  PAID: "Paid",
+  ADVANCE: "Advance",
 };
+
+exports.ALLOCATION_MODE = {
+  AUTO: "auto",
+  MANUAL: "manual",
+};
+
+/** Fee rules that decide whether a published result is visible to a parent. */
+exports.RESULT_FEE_RULES = {
+  ALL_DUE_PAID: "all_due_paid",
+  EXAM_MONTH_PAID: "exam_month_paid",
+  DISABLED: "disabled",
+};
+
+/**
+ * School-configurable settings (school_settings table). These are the
+ * defaults used until management saves a value; see settings.service.
+ */
+exports.SETTING_KEYS = {
+  DAILY_TEST_RULES: "dailyTestRules",
+  RESULT_VISIBILITY: "resultVisibility",
+  FEES: "fees",
+};
+
+exports.SETTING_DEFAULTS = {
+  dailyTestRules: {
+    passPercent: 40,
+    maxFailsPerMonth: 1,
+    lowMarksEnabled: true,
+    lowMarksMinPassed: 3,
+    lowMarksBelowPercent: 55,
+  },
+  resultVisibility: {
+    feeRule: exports.RESULT_FEE_RULES.ALL_DUE_PAID,
+    requireOverrideReason: true,
+  },
+  fees: {
+    defaultMonthlyFee: 8500,
+    dueDay: 10,
+    maxAdvanceMonths: 12,
+  },
+};
+
+exports.WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
 exports.ALLOWED_ORIGINS = [
   "http://localhost:5173",

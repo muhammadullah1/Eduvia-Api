@@ -1,33 +1,40 @@
 "use strict";
 
 const Joi = require("joi");
-
-const resultSchema = Joi.object({
-  studentId: Joi.number().integer(),
-  fkStudentId: Joi.number().integer(),
-  score: Joi.number().allow(null),
-}).or("studentId", "fkStudentId");
+const { id, idParam, isoMonth, weekday, period } = require("./common");
+const { DAILY_TEST_STATUS } = require("../constants");
 
 module.exports = {
-  validateCreate: {
+  validateId: idParam,
+  validateScheduleList: { query: Joi.object({ classId: id, subjectId: id }) },
+  validateSchedule: {
     body: Joi.object({
-      fkClassId: Joi.number().integer().required(),
-      fkSubjectId: Joi.number().integer().allow(null),
-      fkTeacherId: Joi.number().integer().allow(null),
-      date: Joi.date().iso().required(),
-      periodIndex: Joi.number().integer().min(1).allow(null),
-      title: Joi.string().required(),
-      maxScore: Joi.number().positive().default(20),
-      results: Joi.array().items(resultSchema).default([]),
+      classId: id.required(),
+      subjectId: id.required(),
+      weekday: weekday.required(),
+      periodIndex: period.allow(null),
+      maxScore: Joi.number().integer().min(1).max(100).default(20),
     }),
   },
-  validateResults: {
-    params: Joi.object({ id: Joi.number().integer().required() }),
-    body: Joi.object({
-      results: Joi.array().items(resultSchema).min(1).required(),
+  validateGenerate: { body: Joi.object({ month: isoMonth.required(), classId: id }) },
+  validateList: {
+    query: Joi.object({
+      classId: id,
+      subjectId: id,
+      studentId: id,
+      month: isoMonth,
+      status: Joi.string().valid(...Object.values(DAILY_TEST_STATUS)),
     }),
   },
-  validateId: {
-    params: Joi.object({ id: Joi.number().integer().required() }),
+  validateMarks: {
+    ...idParam,
+    body: Joi.object({
+      marks: Joi.array()
+        .items(Joi.object({ studentId: id.required(), score: Joi.number().min(0).allow(null).required() }))
+        .min(1)
+        .required(),
+    }),
   },
+  validateSummary: { query: Joi.object({ classId: id, subjectId: id, month: isoMonth, studentId: id }) },
+  validateFlagged: { query: Joi.object({ month: isoMonth }) },
 };

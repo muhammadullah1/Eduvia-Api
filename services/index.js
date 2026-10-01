@@ -19,5 +19,9 @@ module.exports = {
   teacherAbsenceService: require("./teacher_absence.service"),
   dailyLessonService: require("./daily_lesson.service"),
   dailyTestService: require("./daily_test.service"),
-  monthlyTestService: require("./monthly_test.service"),
+  plannedChapterService: require("./planned_chapter.service"),
+  settingsService: require("./settings.service"),
+  accessService: require("./access.service"),
+  expenseService: require("./expense.service"),
+  noticeService: require("./notice.service"),
 };

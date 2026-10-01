@@ -1,22 +1,19 @@
 "use strict";
 
 const express = require("express");
-const router = express.Router();
-const { teacherAbsenceController } = require("../controllers");
-const { authorizeRoles } = require("../middlewares/authorize_roles");
-const { USER_ROLES, MGMT_ROLES } = require("../constants");
+const { authorize } = require("../middlewares/authorize");
 const validate = require("../middlewares/validate");
-const {
-  validateCreate,
-  validateUpdate,
-  validateId,
-} = require("../validations/teacher_absence");
+const { teacherAbsenceController: c } = require("../controllers");
+const v = require("../validations/teacher_absence");
 
-const staff = [...MGMT_ROLES, USER_ROLES.TEACHER];
+const router = express.Router();
+const manage = authorize("absences.manage");
 
-router.get("/", authorizeRoles(staff), teacherAbsenceController.list);
-router.post("/", authorizeRoles(MGMT_ROLES), validate(validateCreate), teacherAbsenceController.create);
-router.patch("/:id", authorizeRoles(MGMT_ROLES), validate(validateUpdate), teacherAbsenceController.update);
-router.delete("/:id", authorizeRoles(MGMT_ROLES), validate(validateId), teacherAbsenceController.remove);
+router.get("/", authorize("absences.read"), validate(v.validateList), c.list);
+router.post("/", manage, validate(v.validateMarkAbsent), c.markAbsent);
+router.get("/:id/available-substitutes", manage, validate(v.validateId), c.availableSubstitutes);
+router.put("/:id/substitute", manage, validate(v.validateAssign), c.assignSubstitute);
+router.delete("/:id/substitute", manage, validate(v.validateId), c.removeSubstitute);
+router.post("/:id/cancel", manage, validate(v.validateId), c.cancel);
 
 module.exports = router;

@@ -3,9 +3,13 @@
 const { Attendances, Students } = require("../models");
 const ApiError = require("../utils/ApiError");
 
-async function listByClassDate(schoolId, classId, date) {
+async function listByClassDate(schoolId, classId, date, studentIds) {
+  const where = {};
+  if (classId) where.fkClassId = classId;
+  if (date) where.date = date;
+  if (studentIds) where.fkStudentId = studentIds;
   return Attendances.findAll({
-    where: { fkClassId: classId, date },
+    where,
     include: [
       {
         model: Students,
@@ -14,7 +18,8 @@ async function listByClassDate(schoolId, classId, date) {
         required: true,
       },
     ],
-    order: [["id", "ASC"]],
+    order: [["date", "DESC"], ["id", "ASC"]],
+    limit: 500,
   });
 }
 
@@ -25,7 +30,7 @@ async function markMany(schoolId, { classId, date, marks }) {
   const results = [];
   for (const m of marks) {
     const student = await Students.findOne({
-      where: { id: m.studentId, fkSchoolId: schoolId },
+      where: { id: m.studentId, fkSchoolId: schoolId, ...(classId && { fkClassId: classId }) },
     });
     if (!student) throw new ApiError(404, `Student ${m.studentId} not found`);
 

@@ -7,9 +7,15 @@ module.exports = (sequelize, DataTypes) => {
       id: { allowNull: false, autoIncrement: true, primaryKey: true, type: DataTypes.INTEGER },
       fkSchoolId: { type: DataTypes.INTEGER, allowNull: false, field: "fk_school_id" },
       fkClassId: { type: DataTypes.INTEGER, allowNull: false, field: "fk_class_id" },
-      fkSubjectId: { type: DataTypes.INTEGER, allowNull: true, field: "fk_subject_id" },
+      fkSubjectId: { type: DataTypes.INTEGER, allowNull: false, field: "fk_subject_id" },
       fkStudentId: { type: DataTypes.INTEGER, allowNull: false, field: "fk_student_id" },
       month: { type: DataTypes.STRING, allowNull: false },
+      testsScheduled: {
+        type: DataTypes.INTEGER,
+        allowNull: false,
+        defaultValue: 0,
+        field: "tests_scheduled",
+      },
       testsTaken: {
         type: DataTypes.INTEGER,
         allowNull: false,
@@ -32,6 +38,12 @@ module.exports = (sequelize, DataTypes) => {
         type: DataTypes.DECIMAL(6, 2),
         allowNull: true,
         field: "average_percent",
+      },
+      flaggedForFollowUp: {
+        type: DataTypes.BOOLEAN,
+        allowNull: false,
+        defaultValue: false,
+        field: "flagged_for_follow_up",
       },
       status: {
         type: DataTypes.ENUM("InProgress", "Passed", "LowMarks", "Failed"),

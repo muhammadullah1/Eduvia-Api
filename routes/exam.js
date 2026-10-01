@@ -1,33 +1,27 @@
 "use strict";
 
 const express = require("express");
-const router = express.Router();
-const { examController } = require("../controllers");
-const { authorizeRoles } = require("../middlewares/authorize_roles");
-const { USER_ROLES, MGMT_ROLES } = require("../constants");
+const { authorize } = require("../middlewares/authorize");
 const validate = require("../middlewares/validate");
-const {
-  validateCreate,
-  validateRows,
-  validateId,
-  validateOverride,
-} = require("../validations/exam");
+const { examController: c } = require("../controllers");
+const v = require("../validations/exam");
 
-const staff = [...MGMT_ROLES, USER_ROLES.TEACHER];
-const all = [...staff, USER_ROLES.PARENT];
+const router = express.Router();
+const override = authorize("results.override");
 
-router.get("/", authorizeRoles(all), examController.list);
-router.get("/:id", authorizeRoles(all), validate(validateId), examController.getById);
-router.post("/", authorizeRoles(staff), validate(validateCreate), examController.create);
-router.patch("/:id/rows", authorizeRoles(staff), validate(validateRows), examController.updateRows);
-router.post("/:id/submit", authorizeRoles(staff), validate(validateId), examController.submit);
-router.post("/:id/verify", authorizeRoles(MGMT_ROLES), validate(validateId), examController.verify);
-router.post("/:id/publish", authorizeRoles(MGMT_ROLES), validate(validateId), examController.publish);
-router.post(
-  "/:id/override-fee",
-  authorizeRoles(MGMT_ROLES),
-  validate(validateOverride),
-  examController.overrideFeeGate,
-);
+router.get("/parent-results", authorize("results.parent"), validate(v.validateParentResults), c.parentResults);
+router.get("/overrides", override, validate(v.validateOverrideList), c.listOverrides);
+router.delete("/overrides/:overrideId", override, validate(v.validateRevoke), c.revokeOverride);
+router.get("/sheets/:sheetId", authorize("exams.marks"), validate(v.validateSheet), c.getSheet);
+router.put("/sheets/:sheetId/rows", authorize("exams.marks"), validate(v.validateRows), c.updateRows);
+router.post("/sheets/:sheetId/submit", authorize("exams.marks"), validate(v.validateSheet), c.submit);
+router.post("/sheets/:sheetId/verify", authorize("exams.verify"), validate(v.validateSheet), c.verify);
+router.post("/sheets/:sheetId/publish", authorize("exams.publish"), validate(v.validateSheet), c.publish);
+router.post("/sheets/:sheetId/reopen", authorize("exams.verify"), validate(v.validateSheet), c.reopen);
+router.get("/", authorize("exams.read"), validate(v.validateList), c.list);
+router.post("/", authorize("exams.create"), validate(v.validateCreate), c.create);
+router.get("/:id", authorize("exams.read"), validate(v.validateId), c.getById);
+router.get("/:id/visibility", override, validate(v.validateId), c.gateStatus);
+router.post("/:id/overrides", override, validate(v.validateOverride), c.grantOverride);
 
 module.exports = router;
