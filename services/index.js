@@ -24,4 +24,5 @@ module.exports = {
   accessService: require("./access.service"),
   expenseService: require("./expense.service"),
   noticeService: require("./notice.service"),
+  emailService: require("./email.service"),
 };

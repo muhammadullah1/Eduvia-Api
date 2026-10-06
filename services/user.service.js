@@ -78,7 +78,7 @@ async function createStaffUser(actor, payload) {
 
   const hashed = await bcrypt.hash(password, await bcrypt.genSalt(10));
 
-  return sequelize.transaction(async (t) => {
+  const { json, user } = await sequelize.transaction(async (t) => {
     const user = await Users.create(
       {
         fkSchoolId: schoolId,
@@ -114,8 +114,17 @@ async function createStaffUser(actor, payload) {
 
     const json = user.toJSON();
     delete json.password;
-    return json;
+    return { json, user };
   });
+
+  try {
+    const authService = require("./auth.service");
+    await authService.sendUserInvitation(user, role);
+  } catch (err) {
+    console.error("Failed to send staff invitation email:", err.message);
+  }
+
+  return json;
 }
 
 module.exports = {

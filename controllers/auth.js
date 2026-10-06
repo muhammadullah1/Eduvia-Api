@@ -43,4 +43,52 @@ async function updatePassword(req, res, next) {
   }
 }
 
-module.exports = { signIn, updatePassword };
+async function forgotPassword(req, res, next) {
+  try {
+    const { email } = req.body;
+    const result = await authService.forgotPassword(email);
+    return res.status(200).json({
+      success: true,
+      message: result.message,
+      data: result,
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function verifyResetToken(req, res, next) {
+  try {
+    const { token } = req.query;
+    const result = await authService.verifyResetToken(token);
+    return res.status(200).json({
+      success: true,
+      message: "Token is valid",
+      data: result,
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function resetPassword(req, res, next) {
+  try {
+    const { token, password } = req.body;
+    const result = await authService.resetPassword(token, password);
+    return res.status(200).json({
+      success: true,
+      message: result.message,
+      data: result,
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+module.exports = {
+  signIn,
+  updatePassword,
+  forgotPassword,
+  verifyResetToken,
+  resetPassword,
+};

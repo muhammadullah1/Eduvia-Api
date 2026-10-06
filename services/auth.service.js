@@ -1,10 +1,21 @@
 "use strict";
 
 const bcrypt = require("bcryptjs");
+const jwt = require("jsonwebtoken");
+const config = require("../config");
 const userService = require("./user.service");
+const emailService = require("./email.service");
 const { generateToken, verifyToken } = require("../utils");
 const { USER_STATUS } = require("../constants");
 const ApiError = require("../utils/ApiError");
+
+function getResetSecret(user) {
+  return `${config.get("signInJwtSecret")}_reset_${user.password || "initial"}`;
+}
+
+function getInviteSecret(user) {
+  return `${config.get("signInJwtSecret")}_invite_${user.password || "initial"}`;
+}
 
 async function findUserForAuth(userId) {
   return userService.findById(userId, {
@@ -56,9 +67,174 @@ async function signIn(email, password) {
   return { user: userJson, token };
 }
 
+/**
+ * Initiates the password reset flow. Sends an email if user exists.
+ */
+async function forgotPassword(email) {
+  const normalizedEmail = String(email).trim().toLowerCase();
+  const user = await userService.getByEmailWithPassword(normalizedEmail);
+
+  // Always return success to prevent email enumeration
+  if (!user) {
+    return {
+      message: "If an account with that email exists, password reset instructions have been sent.",
+    };
+  }
+
+  const secret = getResetSecret(user);
+  const token = jwt.sign(
+    { id: user.id, email: user.email, purpose: "password_reset" },
+    secret,
+    { expiresIn: "1h" },
+  );
+
+  const frontEndUrl = config.get("frontEndUrl") || "http://localhost:5173";
+  const resetUrl = `${frontEndUrl}/reset-password?token=${token}`;
+
+  await emailService.sendPasswordResetEmail({
+    to: user.email,
+    name: `${user.firstName} ${user.lastName}`.trim(),
+    resetUrl,
+    expiresIn: "1 hour",
+  });
+
+  return {
+    message: "If an account with that email exists, password reset instructions have been sent.",
+    // in simulated mode or dev, include resetUrl for easy testing
+    resetUrl: process.env.NODE_ENV !== "production" ? resetUrl : undefined,
+  };
+}
+
+/**
+ * Verifies a reset or invitation token.
+ */
+async function verifyResetToken(token) {
+  if (!token) throw new ApiError(400, "Token is required");
+
+  let unverified;
+  try {
+    unverified = jwt.decode(token);
+  } catch {
+    throw new ApiError(400, "Malformed token");
+  }
+
+  if (!unverified || !unverified.id) {
+    throw new ApiError(400, "Invalid reset token");
+  }
+
+  const user = await userService.getByIdWithPassword(unverified.id);
+  if (!user) {
+    throw new ApiError(400, "Account associated with this token was not found");
+  }
+
+  const isInvite = unverified.purpose === "invitation";
+  const secret = isInvite ? getInviteSecret(user) : getResetSecret(user);
+
+  try {
+    const decoded = jwt.verify(token, secret);
+    return {
+      valid: true,
+      email: user.email,
+      name: `${user.firstName} ${user.lastName}`.trim(),
+      role: user.role,
+      purpose: decoded.purpose || "password_reset",
+    };
+  } catch (err) {
+    const expired = err.name === "TokenExpiredError";
+    throw new ApiError(
+      400,
+      expired
+        ? "This link has expired. Please request a new one."
+        : "This link is invalid or has already been used.",
+    );
+  }
+}
+
+/**
+ * Resets user password using a verified token.
+ */
+async function resetPassword(token, newPassword) {
+  if (!newPassword || newPassword.length < 8) {
+    throw new ApiError(400, "Password must be at least 8 characters long");
+  }
+
+  let unverified;
+  try {
+    unverified = jwt.decode(token);
+  } catch {
+    throw new ApiError(400, "Malformed token");
+  }
+
+  if (!unverified || !unverified.id) {
+    throw new ApiError(400, "Invalid token");
+  }
+
+  const user = await userService.getByIdWithPassword(unverified.id);
+  if (!user) throw new ApiError(404, "User not found");
+
+  const isInvite = unverified.purpose === "invitation";
+  const secret = isInvite ? getInviteSecret(user) : getResetSecret(user);
+
+  try {
+    jwt.verify(token, secret);
+  } catch (err) {
+    const expired = err.name === "TokenExpiredError";
+    throw new ApiError(
+      400,
+      expired
+        ? "This link has expired. Please request a new one."
+        : "This link is invalid or has already been used.",
+    );
+  }
+
+  const salt = await bcrypt.genSalt(10);
+  const hashedPassword = await bcrypt.hash(newPassword, salt);
+
+  await userService.update(user.id, {
+    password: hashedPassword,
+    status: USER_STATUS.ACTIVE,
+  });
+
+  return {
+    message: isInvite
+      ? "Account activated and password set successfully! You can now log in."
+      : "Password has been reset successfully! You can now log in.",
+  };
+}
+
+/**
+ * Generates an invitation token and sends an invitation email to a newly created user.
+ */
+async function sendUserInvitation(user, role) {
+  const secret = getInviteSecret(user);
+  const token = jwt.sign(
+    { id: user.id, email: user.email, purpose: "invitation" },
+    secret,
+    { expiresIn: "7d" },
+  );
+
+  const frontEndUrl = config.get("frontEndUrl") || "http://localhost:5173";
+  const inviteUrl = `${frontEndUrl}/set-password?token=${token}`;
+
+  await emailService.sendInvitationEmail({
+    to: user.email,
+    name: `${user.firstName || ""} ${user.lastName || ""}`.trim() || user.email,
+    role: role || user.role,
+    inviteUrl,
+    schoolName: "Creative Leaders School",
+    expiresIn: "7 days",
+  });
+
+  return { token, inviteUrl };
+}
+
 module.exports = {
   findUserForAuth,
   signIn,
   generateToken,
   verifyToken,
+  forgotPassword,
+  verifyResetToken,
+  resetPassword,
+  sendUserInvitation,
 };

@@ -1,14 +1,27 @@
 "use strict";
 
 module.exports = (sequelize, DataTypes) => {
-  const Subject = sequelize.define(
-    "subjects",
-    {
-      id: { allowNull: false, autoIncrement: true, primaryKey: true, type: DataTypes.INTEGER },
-      fkSchoolId: { type: DataTypes.INTEGER, allowNull: false, field: "fk_school_id" },
-      name: { type: DataTypes.STRING, allowNull: false },
-      code: { type: DataTypes.STRING, allowNull: false },
+  const Subject = sequelize.define("subjects", {
+    id: {
+      allowNull: false,
+      autoIncrement: true,
+      primaryKey: true,
+      type: DataTypes.INTEGER
     },
+    fkSchoolId: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      field: "fk_school_id"
+    },
+    name: {
+      type: DataTypes.STRING,
+      allowNull: false
+    },
+    code: {
+      type: DataTypes.STRING,
+      allowNull: false
+    },
+  },
     {
       tableName: "subjects",
       paranoid: true,
@@ -21,8 +34,14 @@ module.exports = (sequelize, DataTypes) => {
   );
 
   Subject.associate = (models) => {
-    Subject.belongsTo(models.Schools, { foreignKey: "fkSchoolId", as: "school" });
-    Subject.hasMany(models.Teachers, { foreignKey: "fkSubjectId", as: "teachers" });
+    Subject.belongsTo(models.Schools, {
+      foreignKey: "fkSchoolId",
+      as: "school"
+    });
+    Subject.hasMany(models.Teachers, {
+      foreignKey: "fkSubjectId",
+      as: "teachers"
+    });
   };
 
   return Subject;

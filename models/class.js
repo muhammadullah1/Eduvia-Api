@@ -1,29 +1,52 @@
 "use strict";
 
 module.exports = (sequelize, DataTypes) => {
-  const Class = sequelize.define(
-    "classes",
-    {
-      id: { allowNull: false, autoIncrement: true, primaryKey: true, type: DataTypes.INTEGER },
-      fkSchoolId: { type: DataTypes.INTEGER, allowNull: false, field: "fk_school_id" },
-      fkSessionId: { type: DataTypes.INTEGER, allowNull: false, field: "fk_session_id" },
-      grade: { type: DataTypes.STRING, allowNull: false },
-      section: { type: DataTypes.STRING, allowNull: false },
-      label: { type: DataTypes.STRING, allowNull: false },
-      room: { type: DataTypes.STRING, allowNull: true },
-      periodCount: {
-        type: DataTypes.INTEGER,
-        allowNull: false,
-        defaultValue: 8,
-        field: "period_count",
-      },
-      monthlyFee: {
-        type: DataTypes.DECIMAL(12, 2),
-        allowNull: false,
-        defaultValue: 0,
-        field: "monthly_fee",
-      },
+  const Class = sequelize.define("classes", {
+    id: {
+      allowNull: false,
+      autoIncrement: true,
+      primaryKey: true,
+      type: DataTypes.INTEGER
     },
+    fkSchoolId: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      field: "fk_school_id"
+    },
+    fkSessionId: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      field: "fk_session_id"
+    },
+    grade: {
+      type: DataTypes.STRING,
+      allowNull: false
+    },
+    section: {
+      type: DataTypes.STRING,
+      allowNull: false
+    },
+    label: {
+      type: DataTypes.STRING,
+      allowNull: false
+    },
+    room: {
+      type: DataTypes.STRING,
+      allowNull: true
+    },
+    periodCount: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      defaultValue: 8,
+      field: "period_count",
+    },
+    monthlyFee: {
+      type: DataTypes.DECIMAL(12, 2),
+      allowNull: false,
+      defaultValue: 0,
+      field: "monthly_fee",
+    },
+  },
     {
       tableName: "classes",
       paranoid: true,
@@ -36,14 +59,38 @@ module.exports = (sequelize, DataTypes) => {
   );
 
   Class.associate = (models) => {
-    Class.belongsTo(models.Schools, { foreignKey: "fkSchoolId", as: "school" });
-    Class.belongsTo(models.AcademicSessions, { foreignKey: "fkSessionId", as: "session" });
-    Class.hasMany(models.Students, { foreignKey: "fkClassId", as: "students" });
-    Class.hasMany(models.Attendances, { foreignKey: "fkClassId", as: "attendances" });
-    Class.hasMany(models.TimetableSlots, { foreignKey: "fkClassId", as: "slots" });
-    Class.hasMany(models.DailyLessons, { foreignKey: "fkClassId", as: "dailyLessons" });
-    Class.hasMany(models.TeacherAbsences, { foreignKey: "fkClassId", as: "teacherAbsences" });
-    Class.hasMany(models.PlannedChapters, { foreignKey: "fkClassId", as: "plannedChapters" });
+    Class.belongsTo(models.Schools, {
+      foreignKey: "fkSchoolId",
+      as: "school"
+    });
+    Class.belongsTo(models.AcademicSessions, {
+      foreignKey: "fkSessionId",
+      as: "session"
+    });
+    Class.hasMany(models.Students, {
+      foreignKey: "fkClassId",
+      as: "students"
+    });
+    Class.hasMany(models.Attendances, {
+      foreignKey: "fkClassId",
+      as: "attendances"
+    });
+    Class.hasMany(models.TimetableSlots, {
+      foreignKey: "fkClassId",
+      as: "slots"
+    });
+    Class.hasMany(models.DailyLessons, {
+      foreignKey: "fkClassId",
+      as: "dailyLessons"
+    });
+    Class.hasMany(models.TeacherAbsences, {
+      foreignKey: "fkClassId",
+      as: "teacherAbsences"
+    });
+    Class.hasMany(models.PlannedChapters, {
+      foreignKey: "fkClassId",
+      as: "plannedChapters"
+    });
     Class.belongsToMany(models.Teachers, {
       through: models.TeacherClasses,
       foreignKey: "fkClassId",

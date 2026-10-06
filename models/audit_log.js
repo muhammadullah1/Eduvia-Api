@@ -1,19 +1,51 @@
 "use strict";
 
 module.exports = (sequelize, DataTypes) => {
-  const AuditLog = sequelize.define(
-    "audit_logs",
-    {
-      id: { allowNull: false, autoIncrement: true, primaryKey: true, type: DataTypes.INTEGER },
-      fkSchoolId: { type: DataTypes.INTEGER, allowNull: false, field: "fk_school_id" },
-      actorUserId: { type: DataTypes.INTEGER, allowNull: true, field: "actor_user_id" },
-      actorLabel: { type: DataTypes.STRING, allowNull: false, field: "actor_label" },
-      action: { type: DataTypes.STRING, allowNull: false },
-      at: { type: DataTypes.DATE, allowNull: false },
-      entityType: { type: DataTypes.STRING(64), allowNull: true, field: "entity_type" },
-      entityId: { type: DataTypes.INTEGER, allowNull: true, field: "entity_id" },
-      metadata: { type: DataTypes.JSONB, allowNull: true },
+  const AuditLog = sequelize.define("audit_logs", {
+    id: {
+      allowNull: false,
+      autoIncrement: true,
+      primaryKey: true,
+      type: DataTypes.INTEGER
     },
+    fkSchoolId: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      field: "fk_school_id"
+    },
+    actorUserId: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      field: "actor_user_id"
+    },
+    actorLabel: {
+      type: DataTypes.STRING,
+      allowNull: false,
+      field: "actor_label"
+    },
+    action: {
+      type: DataTypes.STRING,
+      allowNull: false
+    },
+    at: {
+      type: DataTypes.DATE,
+      allowNull: false
+    },
+    entityType: {
+      type: DataTypes.STRING(64),
+      allowNull: true,
+      field: "entity_type"
+    },
+    entityId: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      field: "entity_id"
+    },
+    metadata: {
+      type: DataTypes.JSONB,
+      allowNull: true
+    },
+  },
     {
       tableName: "audit_logs",
       paranoid: false,
@@ -25,8 +57,14 @@ module.exports = (sequelize, DataTypes) => {
   );
 
   AuditLog.associate = (models) => {
-    AuditLog.belongsTo(models.Schools, { foreignKey: "fkSchoolId", as: "school" });
-    AuditLog.belongsTo(models.Users, { foreignKey: "actorUserId", as: "actor" });
+    AuditLog.belongsTo(models.Schools, {
+      foreignKey: "fkSchoolId",
+      as: "school"
+    });
+    AuditLog.belongsTo(models.Users, {
+      foreignKey: "actorUserId",
+      as: "actor"
+    });
   };
 
   return AuditLog;
