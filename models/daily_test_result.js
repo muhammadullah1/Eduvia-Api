@@ -1,13 +1,14 @@
 "use strict";
 
 module.exports = (sequelize, DataTypes) => {
-  const DailyTestResult = sequelize.define("daily_test_results",
+  const DailyTestResult = sequelize.define(
+    "daily_test_results",
     {
       id: {
         allowNull: false,
         autoIncrement: true,
         primaryKey: true,
-        type: DataTypes.INTEGER
+        type: DataTypes.INTEGER,
       },
       fkDailyTestId: {
         type: DataTypes.INTEGER,
@@ -17,36 +18,53 @@ module.exports = (sequelize, DataTypes) => {
       fkStudentId: {
         type: DataTypes.INTEGER,
         allowNull: false,
-        field: "fk_student_id"
+        field: "fk_student_id",
       },
-      score: {
-        type: DataTypes.DECIMAL(8, 2),
-        allowNull: true
-      },
-      fkEnteredByUserId: {
-        type: DataTypes.INTEGER,
+      obtainedMarks: {
+        type: DataTypes.DECIMAL(5, 2),
         allowNull: true,
-        field: "fk_entered_by_user_id"
+        field: "obtained_marks",
+      },
+      isAbsent: {
+        type: DataTypes.BOOLEAN,
+        allowNull: false,
+        defaultValue: false,
+        field: "is_absent",
+      },
+      remarks: {
+        type: DataTypes.STRING(255),
+        allowNull: true,
       },
     },
     {
       tableName: "daily_test_results",
-      paranoid: false,
+      paranoid: true,
       timestamps: true,
       createdAt: "created_at",
       updatedAt: "updated_at",
+      deletedAt: "archived_at",
       underscored: true,
-    },
+      getterMethods: {
+        score() {
+          return this.getDataValue("obtainedMarks");
+        },
+      },
+      setterMethods: {
+        score(val) {
+          this.setDataValue("obtainedMarks", val);
+        },
+      },
+    }
   );
 
   DailyTestResult.associate = (models) => {
     DailyTestResult.belongsTo(models.DailyTests, {
       foreignKey: "fkDailyTestId",
-      as: "test"
+      as: "test",
     });
     DailyTestResult.belongsTo(models.Students, {
       foreignKey: "fkStudentId",
-      as: "student"
+      as: "student",
     });
   };
 

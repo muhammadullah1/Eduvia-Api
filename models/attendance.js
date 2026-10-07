@@ -1,32 +1,54 @@
 "use strict";
 
 module.exports = (sequelize, DataTypes) => {
-  const Attendance = sequelize.define("attendances", {
-    id: {
-      allowNull: false,
-      autoIncrement: true,
-      primaryKey: true,
-      type: DataTypes.INTEGER
+  const Attendance = sequelize.define(
+    "attendances",
+    {
+      id: {
+        allowNull: false,
+        autoIncrement: true,
+        primaryKey: true,
+        type: DataTypes.INTEGER,
+      },
+      fkSchoolId: {
+        type: DataTypes.INTEGER,
+        allowNull: false,
+        field: "fk_school_id",
+      },
+      fkStudentId: {
+        type: DataTypes.INTEGER,
+        allowNull: false,
+        field: "fk_student_id",
+      },
+      fkClassId: {
+        type: DataTypes.INTEGER,
+        allowNull: false,
+        field: "fk_class_id",
+      },
+      date: {
+        type: DataTypes.DATEONLY,
+        allowNull: false,
+      },
+      status: {
+        type: DataTypes.ENUM(
+          "Present",
+          "Absent",
+          "Late",
+          "Excused",
+          "HalfDay"
+        ),
+        allowNull: false,
+      },
+      remarks: {
+        type: DataTypes.STRING(255),
+        allowNull: true,
+      },
+      fkMarkedByUserId: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+        field: "fk_marked_by_user_id",
+      },
     },
-    fkStudentId: {
-      type: DataTypes.INTEGER,
-      allowNull: false,
-      field: "fk_student_id"
-    },
-    fkClassId: {
-      type: DataTypes.INTEGER,
-      allowNull: false,
-      field: "fk_class_id"
-    },
-    date: {
-      type: DataTypes.DATEONLY,
-      allowNull: false
-    },
-    status: {
-      type: DataTypes.ENUM("Present", "Absent", "Leave"),
-      allowNull: false
-    },
-  },
     {
       tableName: "attendances",
       paranoid: true,
@@ -35,17 +57,25 @@ module.exports = (sequelize, DataTypes) => {
       updatedAt: "updated_at",
       deletedAt: "archived_at",
       underscored: true,
-    },
+    }
   );
 
   Attendance.associate = (models) => {
+    Attendance.belongsTo(models.Schools, {
+      foreignKey: "fkSchoolId",
+      as: "school",
+    });
     Attendance.belongsTo(models.Students, {
       foreignKey: "fkStudentId",
-      as: "student"
+      as: "student",
     });
     Attendance.belongsTo(models.Classes, {
       foreignKey: "fkClassId",
-      as: "class"
+      as: "class",
+    });
+    Attendance.belongsTo(models.Users, {
+      foreignKey: "fkMarkedByUserId",
+      as: "markedBy",
     });
   };
 
