@@ -15,7 +15,7 @@ async function list(schoolId, { classId, subjectId } = {}) {
       { model: Classes, as: "class", attributes: ["id", "label"] },
       { model: Subjects, as: "subject", attributes: ["id", "name"] },
     ],
-    order: [["fkClassId", "ASC"], ["fkSubjectId", "ASC"], ["sequence", "ASC"]],
+    order: [["fkClassId", "ASC"], ["fkSubjectId", "ASC"], ["chapterNo", "ASC"]],
   });
 }
 
@@ -32,8 +32,8 @@ async function create(actor, data) {
   ]);
   if (!klass || !subject) throw new ApiError(404, "Class or subject not found");
   const sequence =
-    data.sequence || ((await PlannedChapters.max("sequence", { where: { fkClassId: klass.id, fkSubjectId: subject.id } })) || 0) + 1;
-  if (await PlannedChapters.findOne({ where: { fkClassId: klass.id, fkSubjectId: subject.id, sequence } })) {
+    data.sequence || ((await PlannedChapters.max("chapterNo", { where: { fkClassId: klass.id, fkSubjectId: subject.id } })) || 0) + 1;
+  if (await PlannedChapters.findOne({ where: { fkClassId: klass.id, fkSubjectId: subject.id, chapterNo: sequence } })) {
     throw new ApiError(409, `Chapter ${sequence} already exists for this class and subject.`);
   }
   return PlannedChapters.create({ ...data, sequence, fkSchoolId: actor.schoolId, fkCreatedByUserId: actor.id });

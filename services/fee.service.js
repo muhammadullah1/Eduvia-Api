@@ -36,15 +36,18 @@ const studentAttributes = ["id", "firstName", "lastName", "admissionNo", "fkClas
 
 function presentMonth(row, currentMonth = firstOfMonth(today())) {
   const plain = row.get ? row.get({ plain: true }) : row;
+  const amountDue = Number(plain.netAmount ?? plain.amountDue ?? 0);
+  const amountPaid = Number(plain.paidAmount ?? plain.amountPaid ?? 0);
+  const view = { ...plain, amountDue, amountPaid };
   return {
     id: plain.id,
     month: plain.month,
     label: monthLabel(plain.month),
     feeType: plain.feeType,
-    amountDue: Number(plain.amountDue),
-    amountPaid: Number(plain.amountPaid),
-    balance: outstanding(plain),
-    status: feeMonthStatus(plain, currentMonth),
+    amountDue,
+    amountPaid,
+    balance: fromCents(outstanding(view)),
+    status: feeMonthStatus(view, currentMonth),
     dueDate: plain.dueDate,
   };
 }
@@ -259,7 +262,7 @@ const paymentInclude = [
   {
     model: FeeAllocations,
     as: "allocations",
-    attributes: ["id", "amount"],
+    attributes: ["id", "allocatedAmount"],
     include: [{ model: StudentFeeMonths, as: "feeMonth", attributes: ["id", "month", "feeType"] }],
   },
 ];
@@ -269,15 +272,15 @@ function presentPayment(payment) {
   const months = [...p.allocations].sort((a, b) => a.feeMonth.month.localeCompare(b.feeMonth.month));
   return {
     id: p.id,
-    receiptNo: p.ref,
-    paymentDate: p.paidOn,
-    status: p.status,
-    method: p.method,
-    feeType: p.type,
-    amount: Number(p.amount),
+    receiptNo: p.receiptNo || p.ref,
+    paymentDate: p.paymentDate || p.paidOn,
+    status: p.status || "Paid",
+    method: p.paymentMethod || p.method,
+    feeType: p.feeType || p.type,
+    amount: Number(p.amountPaid ?? p.amount),
     unallocatedAmount: Number(p.unallocatedAmount),
     allocationMode: p.allocationMode,
-    feeMonths: months.map((a) => ({ month: a.feeMonth.month, label: monthLabel(a.feeMonth.month), amount: Number(a.amount) })),
+    feeMonths: months.map((a) => ({ id: a.feeMonth.id, month: a.feeMonth.month, label: monthLabel(a.feeMonth.month), amount: Number(a.amount ?? a.allocatedAmount) })),
     student: p.student && {
       id: p.student.id,
       name: `${p.student.firstName} ${p.student.lastName}`,
@@ -308,9 +311,9 @@ async function listPayments(user, { studentId, date, status } = {}) {
     await accessService.assertStudentAccess(user, studentId);
     where.fkStudentId = studentId;
   }
-  if (date) where.paidOn = date;
-  if (status) where.status = status;
-  const rows = await FeePayments.findAll({ where, include: paymentInclude, order: [["paidOn", "DESC"], ["id", "DESC"]] });
+  if (date) where.paymentDate = date;
+  void status;
+  const rows = await FeePayments.findAll({ where, include: paymentInclude, order: [["paymentDate", "DESC"], ["id", "DESC"]] });
   return rows.map(presentPayment);
 }
 

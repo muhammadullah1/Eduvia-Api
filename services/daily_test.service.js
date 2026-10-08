@@ -34,7 +34,7 @@ const scheduleInclude = [
 // ---- schedules -------------------------------------------------------------
 
 async function listSchedules(schoolId, { classId, subjectId } = {}) {
-  const where = { fkSchoolId: schoolId, isActive: true };
+  const where = { fkSchoolId: schoolId };
   if (classId) where.fkClassId = classId;
   if (subjectId) where.fkSubjectId = subjectId;
   return DailyTestSchedules.findAll({ where, include: scheduleInclude, order: [["fkClassId", "ASC"], ["fkSubjectId", "ASC"]] });
@@ -105,31 +105,36 @@ async function generateMonth(actor, { month, classId }) {
 
 async function scopeWhere(user, filters) {
   const where = { fkSchoolId: user.schoolId };
-  for (const [key, column] of [["classId", "fkClassId"], ["subjectId", "fkSubjectId"], ["month", "month"], ["status", "status"]]) {
-    if (filters[key]) where[column] = filters[key];
-  }
+  if (filters.classId) where.fkClassId = filters.classId;
+  if (filters.subjectId) where.fkSubjectId = filters.subjectId;
   if (user.role === USER_ROLES.TEACHER) {
     const teacher = await accessService.teacherFor(user);
     where.fkSubjectId = teacher.fkSubjectId;
-    where.fkClassId = { [Op.in]: await accessService.teacherClassIds(teacher), ...(filters.classId && { [Op.eq]: filters.classId }) };
+    where.fkClassId = filters.classId || { [Op.in]: await accessService.teacherClassIds(teacher) };
   }
-  if (user.role === USER_ROLES.PARENT) where.status = DAILY_TEST_STATUS.PUBLISHED;
   return where;
 }
 
 async function list(user, filters = {}) {
   let studentFilter;
   if (user.role === USER_ROLES.PARENT) {
-    if (!filters.studentId) throw new ApiError(400, "studentId is required");
-    const student = await accessService.assertStudentAccess(user, filters.studentId);
-    filters = { ...filters, classId: student.fkClassId };
-    studentFilter = { fkStudentId: student.id };
+    const studentIds = await accessService.linkedStudentIds(user);
+    if (filters.studentId) {
+      const student = await accessService.assertStudentAccess(user, filters.studentId);
+      filters = { ...filters, classId: student.fkClassId };
+      studentFilter = { fkStudentId: student.id };
+    } else if (!studentIds.length) {
+      return [];
+    } else {
+      filters = { ...filters, classId: { [Op.in]: await accessService.linkedClassIds(user) } };
+      studentFilter = { fkStudentId: { [Op.in]: studentIds } };
+    }
   }
   return DailyTests.findAll({
     where: await scopeWhere(user, filters),
     include: [
       ...scheduleInclude,
-      { model: DailyTestResults, as: "results", required: false, where: studentFilter, attributes: ["fkStudentId", "score"] },
+      { model: DailyTestResults, as: "results", required: false, where: studentFilter, attributes: ["fkStudentId", "obtainedMarks"] },
     ],
     order: [["date", "ASC"]],
   });

@@ -15,8 +15,8 @@ const auditService = require("./audit.service");
 const include = [
   { model: Classes, as: "class", attributes: ["id", "label"] },
   { model: Subjects, as: "subject", attributes: ["id", "name"] },
-  { model: PlannedChapters, as: "plannedChapter", attributes: ["id", "sequence", "title"] },
-  { model: Teachers, as: "teacher", attributes: ["id"], include: [{ model: Users, as: "user", attributes: ["firstName", "lastName"] }] },
+  { model: PlannedChapters, as: "chapter", attributes: ["id", "chapterNo", "title"] },
+  { model: Teachers, as: "teacher", attributes: ["id"], include: [{ model: Users, as: "user", attributes: ["firstName", "lastName", "email"] }] },
 ];
 
 async function list(user, { classId, subjectId, date, from, to, reviewStatus, studentId } = {}) {
@@ -32,14 +32,12 @@ async function list(user, { classId, subjectId, date, from, to, reviewStatus, st
       ? [(await accessService.assertStudentAccess(user, studentId)).fkClassId]
       : await accessService.linkedClassIds(user);
     where.fkClassId = classId ? classIds.filter((id) => id === Number(classId)) : classIds;
-    where.reviewStatus = LESSON_REVIEW_STATUS.APPROVED;
   } else if (user.role === USER_ROLES.TEACHER) {
     where.fkTeacherId = (await accessService.teacherFor(user)).id;
   }
   return DailyLessons.findAll({
     where,
     include,
-    attributes: user.role === USER_ROLES.PARENT ? { exclude: ["reviewNote", "fkReviewedByUserId"] } : undefined,
     order: [["date", "DESC"], ["id", "DESC"]],
   });
 }

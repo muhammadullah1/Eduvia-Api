@@ -11,7 +11,8 @@ const {
   Subjects,
   sequelize,
 } = require("../models");
-const { ABSENCE_STATUS } = require("../constants");
+const { ABSENCE_STATUS, USER_ROLES } = require("../constants");
+const accessService = require("./access.service");
 const ApiError = require("../utils/ApiError");
 const auditService = require("./audit.service");
 const { weekdayOf } = require("../utils/dates");
@@ -26,23 +27,34 @@ const teacherWithName = (as) => ({
 
 const absenceInclude = [
   teacherWithName("teacher"),
-  { model: Classes, as: "class", attributes: ["id", "label"] },
-  { model: Subjects, as: "subject", attributes: ["id", "name"] },
   {
     model: SubstituteAssignments,
-    as: "substitution",
-    include: [teacherWithName("substituteTeacher"), { model: Users, as: "authorizedBy", attributes: ["id", "firstName", "lastName"] }],
+    as: "substitutions",
+    include: [
+      teacherWithName("substituteTeacher"),
+      {
+        model: TimetableSlots,
+        as: "slot",
+        include: [
+          { model: Classes, as: "class", attributes: ["id", "label"] },
+          { model: Subjects, as: "subject", attributes: ["id", "name"] },
+        ],
+      },
+    ],
   },
 ];
 
 const teacherName = (t) => (t && t.user ? `${t.user.firstName} ${t.user.lastName}` : `Teacher #${t && t.id}`);
 
-async function list(schoolId, { date, teacherId, status } = {}) {
+async function list(schoolId, { date, teacherId, status } = {}, user) {
   const where = { fkSchoolId: schoolId };
   if (date) where.date = date;
   if (teacherId) where.fkTeacherId = teacherId;
   if (status) where.status = status;
-  return TeacherAbsences.findAll({ where, include: absenceInclude, order: [["date", "DESC"], ["periodIndex", "ASC"]] });
+  const rows = await TeacherAbsences.findAll({ where, include: absenceInclude, order: [["date", "DESC"], ["id", "ASC"]] });
+  if (!user || user.role !== USER_ROLES.TEACHER) return rows;
+  const teacher = await accessService.teacherFor(user);
+  return rows.filter((row) => row.fkTeacherId === teacher.id || (row.substitutions || []).some((item) => item.fkSubstituteTeacherId === teacher.id));
 }
 
 async function getById(id, schoolId, options = {}) {

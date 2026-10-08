@@ -1,6 +1,6 @@
 "use strict";
 
-const { AuditLogs } = require("../models");
+const { AuditLogs, sequelize } = require("../models");
 
 async function log(schoolId, { actorUserId, actorLabel, action, entityType, entityId, metadata }, options = {}) {
   return AuditLogs.create(
@@ -40,7 +40,7 @@ async function list(schoolId, { limit = 50, entityType, entityId } = {}) {
   if (entityId) where.entityId = entityId;
   return AuditLogs.findAll({
     where,
-    order: [["at", "DESC"]],
+    order: [[sequelize.literal("created_at"), "DESC"]],
     limit: Math.min(Number(limit) || 50, 200),
   });
 }

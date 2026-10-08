@@ -7,10 +7,10 @@ const auditService = require("./audit.service");
 async function list(schoolId, { category, date, limit = 100, offset = 0 } = {}) {
   const where = { fkSchoolId: schoolId };
   if (category) where.category = category;
-  if (date) where.date = date;
+  if (date) where.expenseDate = date;
   return Expenses.findAll({
     where,
-    order: [["date", "DESC"], ["id", "DESC"]],
+    order: [["expenseDate", "DESC"], ["id", "DESC"]],
     limit: Math.min(Number(limit) || 100, 200),
     offset: Math.max(Number(offset) || 0, 0),
   });

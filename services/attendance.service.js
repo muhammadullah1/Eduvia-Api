@@ -23,6 +23,11 @@ async function listByClassDate(schoolId, classId, date, studentIds) {
   });
 }
 
+function storedStatus(status) {
+  if (status === "Leave") return "Excused";
+  return status;
+}
+
 async function markMany(schoolId, { classId, date, marks }) {
   if (!Array.isArray(marks) || !marks.length) {
     throw new ApiError(400, "marks array is required");
@@ -37,13 +42,15 @@ async function markMany(schoolId, { classId, date, marks }) {
     const [row] = await Attendances.findOrCreate({
       where: { fkStudentId: m.studentId, date },
       defaults: {
+        fkSchoolId: schoolId,
         fkClassId: classId || student.fkClassId,
-        status: m.status,
+        status: storedStatus(m.status),
       },
     });
-    if (row.status !== m.status || (classId && row.fkClassId !== classId)) {
+    const nextStatus = storedStatus(m.status);
+    if (row.status !== nextStatus || (classId && row.fkClassId !== classId)) {
       await row.update({
-        status: m.status,
+        status: nextStatus,
         fkClassId: classId || row.fkClassId,
       });
     }

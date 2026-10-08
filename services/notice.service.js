@@ -9,9 +9,8 @@ const auditService = require("./audit.service");
 
 const SETTING_KEY = "school_updates";
 
-async function getStoredUpdates(schoolId) {
-  const row = await SchoolSettings.findOne({ where: { fkSchoolId: schoolId, key: SETTING_KEY } });
-  return Array.isArray(row && row.value) ? row.value : [];
+async function getStoredUpdates() {
+  return [];
 }
 
 async function saveStoredUpdates(schoolId, updates, userId) {

@@ -43,7 +43,7 @@ const PERMISSIONS = {
   "timetable.read": [SA, OPS, TCH, PAR],
   "timetable.manage": [SA, OPS],
 
-  "absences.read": [SA, OPS],
+  "absences.read": [SA, OPS, TCH],
   "absences.manage": [SA, OPS],
 
   "chapters.read": [SA, OPS, TCH],
@@ -57,7 +57,7 @@ const PERMISSIONS = {
   "tests.marks": [SA, OPS, TCH],
   "tests.publish": [SA, OPS],
 
-  "exams.read": [SA, OPS, TCH],
+  "exams.read": [SA, OPS, TCH, PAR],
   "exams.create": [SA, OPS],
   "exams.marks": [SA, OPS, TCH],
   "exams.verify": [SA, OPS],

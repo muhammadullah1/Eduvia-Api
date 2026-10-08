@@ -35,19 +35,43 @@ async function teacherScope(user) {
 }
 
 async function list(user, { classId } = {}) {
-  const where = { fkSchoolId: user.schoolId };
-  if (classId) where.fkClassId = classId;
   const scope = await teacherScope(user);
-  const sheetWhere = scope ? { fkSubjectId: scope.teacher.fkSubjectId } : undefined;
-  if (scope) where.fkClassId = classId ? scope.classIds.filter((id) => id === Number(classId)) : scope.classIds;
-  return Exams.findAll({
-    where,
+  const sheetWhere = {};
+  if (scope) {
+    sheetWhere.fkSubjectId = scope.teacher.fkSubjectId;
+    const allowed = classId ? scope.classIds.filter((id) => id === Number(classId)) : scope.classIds;
+    sheetWhere.fkClassId = allowed.length ? allowed : [-1];
+  } else if (classId) {
+    sheetWhere.fkClassId = classId;
+  }
+  const exams = await Exams.findAll({
+    where: { fkSchoolId: user.schoolId },
     include: [
-      { model: Classes, as: "class", attributes: ["id", "label"] },
-      { model: MarkSheets, as: "sheets", where: sheetWhere, required: false, attributes: ["id", "subject", "fkSubjectId", "status", "maxScore", "publishedAt"] },
+      {
+        model: MarkSheets,
+        as: "markSheets",
+        where: Object.keys(sheetWhere).length ? sheetWhere : undefined,
+        required: false,
+        include: [
+          { model: Subjects, as: "subject", attributes: ["id", "name"] },
+          { model: MarkSheetRows, as: "rows" },
+        ],
+      },
     ],
     order: [["id", "DESC"]],
   });
+  if (user.role !== USER_ROLES.PARENT) return exams;
+  const studentIds = new Set(await accessService.linkedStudentIds(user));
+  return exams
+    .map((exam) => {
+      const plain = exam.get({ plain: true });
+      plain.markSheets = (plain.markSheets || [])
+        .filter((sheet) => sheet.status === "Published")
+        .map((sheet) => ({ ...sheet, rows: (sheet.rows || []).filter((row) => studentIds.has(row.fkStudentId)) }))
+        .filter((sheet) => sheet.rows.length);
+      return plain;
+    })
+    .filter((exam) => exam.markSheets.length);
 }
 
 async function create(actor, { classId, name, feeMonth, sessionId, subjects }) {

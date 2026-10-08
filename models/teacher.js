@@ -83,6 +83,12 @@ module.exports = (sequelize, DataTypes) => {
       foreignKey: "fkTeacherId",
       as: "teacherClasses",
     });
+    Teacher.belongsToMany(models.Classes, {
+      through: models.TeacherClasses,
+      foreignKey: "fkTeacherId",
+      otherKey: "fkClassId",
+      as: "classes",
+    });
     Teacher.hasMany(models.TimetableSlots, {
       foreignKey: "fkTeacherId",
       as: "timetableSlots",

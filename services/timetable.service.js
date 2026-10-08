@@ -19,7 +19,16 @@ async function listByClass(user, classId) {
   }
   return TimetableSlots.findAll({
     where,
-    order: [["day", "ASC"], ["periodIndex", "ASC"]],
+    include: [
+      { model: Subjects, as: "subject", attributes: ["id", "name"] },
+      {
+        model: Teachers,
+        as: "teacher",
+        attributes: ["id"],
+        include: [{ model: Users, as: "user", attributes: ["firstName", "lastName", "email"] }],
+      },
+    ],
+    order: [["dayOfWeek", "ASC"], ["periodIndex", "ASC"]],
   });
 }
 
