@@ -67,18 +67,13 @@ async function signIn(email, password) {
   return { user: userJson, token };
 }
 
-/**
- * Initiates the password reset flow. Sends an email if user exists.
- */
+
 async function forgotPassword(email) {
   const normalizedEmail = String(email).trim().toLowerCase();
   const user = await userService.getByEmailWithPassword(normalizedEmail);
 
-  // Always return success to prevent email enumeration
   if (!user) {
-    return {
-      message: "If an account with that email exists, password reset instructions have been sent.",
-    };
+    throw new ApiError(404, "user account not exits")
   }
 
   const secret = getResetSecret(user);
@@ -88,7 +83,7 @@ async function forgotPassword(email) {
     { expiresIn: "1h" },
   );
 
-  const frontEndUrl = config.get("frontEndUrl") || "http://localhost:5173";
+  const frontEndUrl = config.get("frontEndUrl");
   const resetUrl = `${frontEndUrl}/reset-password?token=${token}`;
 
   await emailService.sendPasswordResetEmail({
@@ -99,15 +94,12 @@ async function forgotPassword(email) {
   });
 
   return {
-    message: "If an account with that email exists, password reset instructions have been sent.",
-    // in simulated mode or dev, include resetUrl for easy testing
-    resetUrl: process.env.NODE_ENV !== "production" ? resetUrl : undefined,
+    message: "password reset email have been sent.",
+    resetUrl: resetUrl,
   };
 }
 
-/**
- * Verifies a reset or invitation token.
- */
+
 async function verifyResetToken(token) {
   if (!token) throw new ApiError(400, "Token is required");
 
