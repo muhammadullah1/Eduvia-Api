@@ -142,9 +142,6 @@ async function verifyResetToken(token) {
   }
 }
 
-/**
- * Resets user password using a verified token.
- */
 async function resetPassword(token, newPassword) {
   if (!newPassword || newPassword.length < 8) {
     throw new ApiError(400, "Password must be at least 8 characters long");
@@ -194,9 +191,6 @@ async function resetPassword(token, newPassword) {
   };
 }
 
-/**
- * Generates an invitation token and sends an invitation email to a newly created user.
- */
 async function sendUserInvitation(user, role) {
   const secret = getInviteSecret(user);
   const token = jwt.sign(
@@ -205,7 +199,7 @@ async function sendUserInvitation(user, role) {
     { expiresIn: "7d" },
   );
 
-  const frontEndUrl = config.get("frontEndUrl") || "http://localhost:5173";
+  const frontEndUrl = config.get("frontEndUrl");
   const inviteUrl = `${frontEndUrl}/set-password?token=${token}`;
 
   await emailService.sendInvitationEmail({

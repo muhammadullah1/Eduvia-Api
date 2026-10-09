@@ -88,7 +88,6 @@ async function generateMonth(actor, { month, classId }) {
           fkTeacherId: slot ? slot.fkTeacherId : null,
           month,
           weekOfMonth: weekOfMonth(date),
-          periodIndex: schedule.periodIndex || (slot ? slot.periodIndex : null),
           title: `${schedule.subject.name} weekly test · week ${weekOfMonth(date)}`,
           maxScore: schedule.maxScore,
           status: DAILY_TEST_STATUS.SCHEDULED,

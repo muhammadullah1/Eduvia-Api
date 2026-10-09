@@ -25,6 +25,9 @@ exports.USER_STATUS = {
 exports.STUDENT_STATUS = {
   ACTIVE: "Active",
   PENDING: "Pending",
+  INACTIVE: "Inactive",
+  GRADUATED: "Graduated",
+  STRUCK_OFF: "StruckOff",
   WITHDRAWN: "Withdrawn",
 };
 
@@ -131,6 +134,7 @@ exports.SETTING_KEYS = {
   DAILY_TEST_RULES: "dailyTestRules",
   RESULT_VISIBILITY: "resultVisibility",
   FEES: "fees",
+  ADMISSION: "admission",
 };
 
 exports.SETTING_DEFAULTS = {
@@ -150,11 +154,26 @@ exports.SETTING_DEFAULTS = {
     dueDay: 10,
     maxAdvanceMonths: 12,
   },
+  admission: {
+    prefix: "CLS",
+    digits: 4,
+  },
 };
+
+/**
+ * Working grade scale. The SRS names A+ at 90 and F below 50 and leaves the
+ * bands between them as school configuration. These even steps are the default
+ * until the school replaces them.
+ */
+exports.GRADE_BANDS = [
+  { min: 90, grade: "A+" },
+  { min: 80, grade: "A" },
+  { min: 70, grade: "B" },
+  { min: 60, grade: "C" },
+  { min: 50, grade: "D" },
+  { min: 0, grade: "F" },
+];
 
 exports.WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
-exports.ALLOWED_ORIGINS = [
-  "http://localhost:5173",
-  "http://localhost:3000",
-];
+exports.ALLOWED_ORIGINS = ["http://localhost:5173", "http://localhost:5174"];

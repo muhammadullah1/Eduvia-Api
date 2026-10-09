@@ -60,7 +60,7 @@ module.exports = (sequelize, DataTypes) => {
         field: "paid_amount",
       },
       status: {
-        type: DataTypes.ENUM("Unpaid", "Partial", "Paid"),
+        type: DataTypes.ENUM("Unpaid", "Partially Paid", "Paid", "Advance"),
         allowNull: false,
         defaultValue: "Unpaid",
       },

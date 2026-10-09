@@ -24,14 +24,39 @@ module.exports = (sequelize, DataTypes) => {
         type: DataTypes.DATEONLY,
         allowNull: false,
       },
+      periodIndex: {
+        type: DataTypes.INTEGER,
+        allowNull: false,
+        field: "period_index",
+      },
+      fkClassId: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+        field: "fk_class_id",
+      },
+      fkSubjectId: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+        field: "fk_subject_id",
+      },
+      fkTimetableSlotId: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+        field: "fk_timetable_slot_id",
+      },
       reason: {
         type: DataTypes.TEXT,
         allowNull: true,
       },
       status: {
-        type: DataTypes.ENUM("Pending", "Approved", "Rejected"),
+        type: DataTypes.ENUM("Pending", "Covered", "Cancelled", "NoClass"),
         allowNull: false,
         defaultValue: "Pending",
+      },
+      fkMarkedByUserId: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+        field: "fk_marked_by_user_id",
       },
       fkApprovedByUserId: {
         type: DataTypes.INTEGER,
@@ -47,6 +72,16 @@ module.exports = (sequelize, DataTypes) => {
       updatedAt: "updated_at",
       deletedAt: "archived_at",
       underscored: true,
+      getterMethods: {
+        notes() {
+          return this.getDataValue("reason");
+        },
+      },
+      setterMethods: {
+        notes(val) {
+          this.setDataValue("reason", val);
+        },
+      },
     }
   );
 
@@ -66,6 +101,10 @@ module.exports = (sequelize, DataTypes) => {
     TeacherAbsence.hasMany(models.SubstituteAssignments, {
       foreignKey: "fkAbsenceId",
       as: "substitutions",
+    });
+    TeacherAbsence.hasOne(models.SubstituteAssignments, {
+      foreignKey: "fkAbsenceId",
+      as: "substitution",
     });
   };
 

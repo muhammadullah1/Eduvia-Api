@@ -11,7 +11,12 @@ const KEY_PERMISSION = {
   [SETTING_KEYS.DAILY_TEST_RULES]: "settings.academic.update",
   [SETTING_KEYS.RESULT_VISIBILITY]: "settings.fees.update",
   [SETTING_KEYS.FEES]: "settings.fees.update",
+  [SETTING_KEYS.ADMISSION]: "settings.academic.update",
 };
+
+function permissionFor(key) {
+  return KEY_PERMISSION[key] || null;
+}
 
 async function get(schoolId, key, options = {}) {
   const row = await SchoolSettings.findOne({ where: { fkSchoolId: schoolId, key }, ...options });
@@ -42,4 +47,4 @@ async function update(actor, key, value) {
   return next;
 }
 
-module.exports = { get, getAll, update };
+module.exports = { get, getAll, update, permissionFor };

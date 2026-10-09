@@ -24,6 +24,8 @@ const settingsRouter = require("./settings");
 const auditRouter = require("./audit");
 const expenseRouter = require("./expense");
 const noticeRouter = require("./notice");
+const leaveRouter = require("./leave");
+const reportRouter = require("./report");
 
 const router = express.Router();
 
@@ -50,5 +52,7 @@ router.use("/daily-tests", dailyTestRouter);
 router.use("/planned-chapters", plannedChapterRouter);
 router.use("/settings", settingsRouter);
 router.use("/audit-logs", auditRouter);
+router.use("/leave-requests", leaveRouter);
+router.use("/reports", reportRouter);
 
 module.exports = router;

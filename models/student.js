@@ -57,6 +57,7 @@ module.exports = (sequelize, DataTypes) => {
       status: {
         type: DataTypes.ENUM(
           "Active",
+          "Pending",
           "Inactive",
           "Graduated",
           "StruckOff",
@@ -159,6 +160,12 @@ module.exports = (sequelize, DataTypes) => {
       foreignKey: "fkStudentId",
       as: "monthlySummaries",
     });
+    if (models.StudentStatusEvents) {
+      Student.hasMany(models.StudentStatusEvents, { foreignKey: "fkStudentId", as: "statusEvents" });
+    }
+    if (models.StudentPromotions) {
+      Student.hasMany(models.StudentPromotions, { foreignKey: "fkStudentId", as: "promotions" });
+    }
     if (models.StudentLeaveRequests) {
       Student.hasMany(models.StudentLeaveRequests, {
         foreignKey: "fkStudentId",

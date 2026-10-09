@@ -16,6 +16,7 @@ const platformMiddleware = (req, res, next) => {
 
     req.platform = platform.type;
     if (platform.requiresVersion) {
+      const version = req.header("version");
       if (!version) {
         throw new ApiError(400, "Missing version header for mobile requests");
       }

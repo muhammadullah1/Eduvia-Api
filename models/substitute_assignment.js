@@ -22,13 +22,37 @@ module.exports = (sequelize, DataTypes) => {
       },
       fkTimetableSlotId: {
         type: DataTypes.INTEGER,
-        allowNull: false,
+        allowNull: true,
         field: "fk_timetable_slot_id",
+      },
+      fkClassId: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+        field: "fk_class_id",
+      },
+      fkSubjectId: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+        field: "fk_subject_id",
+      },
+      fkOriginalTeacherId: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+        field: "fk_original_teacher_id",
       },
       fkSubstituteTeacherId: {
         type: DataTypes.INTEGER,
         allowNull: false,
         field: "fk_substitute_teacher_id",
+      },
+      fkAuthorizedByUserId: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+        field: "fk_authorized_by_user_id",
+      },
+      notes: {
+        type: DataTypes.TEXT,
+        allowNull: true,
       },
       date: {
         type: DataTypes.DATEONLY,
@@ -72,6 +96,18 @@ module.exports = (sequelize, DataTypes) => {
     SubstituteAssignment.belongsTo(models.Teachers, {
       foreignKey: "fkSubstituteTeacherId",
       as: "substituteTeacher",
+    });
+    SubstituteAssignment.belongsTo(models.Teachers, {
+      foreignKey: "fkOriginalTeacherId",
+      as: "originalTeacher",
+    });
+    SubstituteAssignment.belongsTo(models.Classes, {
+      foreignKey: "fkClassId",
+      as: "class",
+    });
+    SubstituteAssignment.belongsTo(models.Subjects, {
+      foreignKey: "fkSubjectId",
+      as: "subject",
     });
   };
 
