@@ -1,21 +1,22 @@
 "use strict";
 
 const Joi = require("joi");
+const { id, idParam, isoDay } = require("./common");
 
 module.exports = {
-  validateAssignSubjects: {
-    params: Joi.object({ id: Joi.number().integer().required() }),
+  validateId: idParam,
+  validateChangeSubject: {
+    ...idParam,
     body: Joi.object({
-      subjectIds: Joi.array().items(Joi.number().integer()).required(),
+      subjectId: id.required(),
+      reason: Joi.string().max(500).allow("", null),
+      effectiveFrom: isoDay,
     }),
   },
   validateAssignClasses: {
-    params: Joi.object({ id: Joi.number().integer().required() }),
-    body: Joi.object({
-      classIds: Joi.array().items(Joi.number().integer()).required(),
-    }),
+    ...idParam,
+    body: Joi.object({ classIds: Joi.array().items(id).required() }),
   },
-  validateId: {
-    params: Joi.object({ id: Joi.number().integer().required() }),
-  },
+  validateSchedule: { query: Joi.object({ date: isoDay }) },
+  validateTeacherSchedule: { ...idParam, query: Joi.object({ date: isoDay }) },
 };

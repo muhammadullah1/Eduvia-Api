@@ -15,4 +15,12 @@ module.exports = {
   feeController: require("./fee"),
   examController: require("./exam"),
   timetableController: require("./timetable"),
+  teacherAbsenceController: require("./teacher_absence"),
+  dailyLessonController: require("./daily_lesson"),
+  dailyTestController: require("./daily_test"),
+  plannedChapterController: require("./planned_chapter"),
+  settingsController: require("./settings"),
+  auditController: require("./audit"),
+  expenseController: require("./expense"),
+  noticeController: require("./notice"),
 };

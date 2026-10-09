@@ -4,12 +4,7 @@ const ApiError = require("../utils/ApiError");
 
 const platformMiddleware = (req, res, next) => {
   try {
-    const platformHeader = req.header("platform");
-    const version = req.header("version");
-
-    if (!platformHeader) {
-      throw new ApiError(400, "Missing platform header");
-    }
+    const platformHeader = req.header("platform") || "webApp";
 
     const platform = PLATFORMS[platformHeader];
     if (!platform) {

@@ -3,9 +3,13 @@
 const { Attendances, Students } = require("../models");
 const ApiError = require("../utils/ApiError");
 
-async function listByClassDate(schoolId, classId, date) {
+async function listByClassDate(schoolId, classId, date, studentIds) {
+  const where = {};
+  if (classId) where.fkClassId = classId;
+  if (date) where.date = date;
+  if (studentIds) where.fkStudentId = studentIds;
   return Attendances.findAll({
-    where: { fkClassId: classId, date },
+    where,
     include: [
       {
         model: Students,
@@ -14,8 +18,14 @@ async function listByClassDate(schoolId, classId, date) {
         required: true,
       },
     ],
-    order: [["id", "ASC"]],
+    order: [["date", "DESC"], ["id", "ASC"]],
+    limit: 500,
   });
+}
+
+function storedStatus(status) {
+  if (status === "Leave") return "Excused";
+  return status;
 }
 
 async function markMany(schoolId, { classId, date, marks }) {
@@ -25,20 +35,22 @@ async function markMany(schoolId, { classId, date, marks }) {
   const results = [];
   for (const m of marks) {
     const student = await Students.findOne({
-      where: { id: m.studentId, fkSchoolId: schoolId },
+      where: { id: m.studentId, fkSchoolId: schoolId, ...(classId && { fkClassId: classId }) },
     });
     if (!student) throw new ApiError(404, `Student ${m.studentId} not found`);
 
     const [row] = await Attendances.findOrCreate({
       where: { fkStudentId: m.studentId, date },
       defaults: {
+        fkSchoolId: schoolId,
         fkClassId: classId || student.fkClassId,
-        status: m.status,
+        status: storedStatus(m.status),
       },
     });
-    if (row.status !== m.status || (classId && row.fkClassId !== classId)) {
+    const nextStatus = storedStatus(m.status);
+    if (row.status !== nextStatus || (classId && row.fkClassId !== classId)) {
       await row.update({
-        status: m.status,
+        status: nextStatus,
         fkClassId: classId || row.fkClassId,
       });
     }

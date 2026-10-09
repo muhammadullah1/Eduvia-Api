@@ -1,27 +1,20 @@
 "use strict";
 
-const { attendanceService } = require("../services");
+const { attendanceService, accessService } = require("../services");
+const { handle } = require("../utils/handler");
 
 module.exports = {
-  list: async (req, res, next) => {
-    try {
-      const { classId, date } = req.query;
-      const data = await attendanceService.listByClassDate(
-        req.user.schoolId,
-        classId,
-        date,
-      );
-      res.status(200).json({ success: true, message: "Attendance", data });
-    } catch (err) {
-      next(err);
+  list: handle("Attendance", async (req) => {
+    const { classId, date } = req.query;
+    if (classId) {
+      await accessService.assertTeacherClass(req.user, classId, date);
+      await accessService.assertClassVisible(req.user, classId);
     }
-  },
-  mark: async (req, res, next) => {
-    try {
-      const data = await attendanceService.markMany(req.user.schoolId, req.body);
-      res.status(200).json({ success: true, message: "Attendance marked", data });
-    } catch (err) {
-      next(err);
-    }
-  },
+    const studentIds = await accessService.studentScope(req.user);
+    return attendanceService.listByClassDate(req.user.schoolId, classId, date, studentIds);
+  }),
+  mark: handle("Attendance marked", async (req) => {
+    await accessService.assertTeacherClass(req.user, req.body.classId, req.body.date);
+    return attendanceService.markMany(req.user.schoolId, req.body);
+  }),
 };

@@ -10,5 +10,18 @@
   },
   "signInJwtSecret": "change-me-eduvia-jwt-secret",
   "frontEndUrl": "http://localhost:5173",
-  "appVersion": "1.0.0"
+  "appVersion": "1.0.0",
+  "resend": {
+    "apiKey": "your_resend_api_key",
+    "fromEmail": "noreply@yourdomain.com",
+    "fromName": "Eduvia"
+  },
+  "cloudFareR2": {
+    "accountId": "<YOUR_CLOUDFLARE_ACCOUNT_ID>",
+    "accessKeyId": "<YOUR_R2_ACCESS_KEY_ID>",
+    "secretAccessKey": "<YOUR_R2_SECRET_ACCESS_KEY>",
+    "bucket": "<YOUR_R2_BUCKET>",
+    "endpoint": "https://<YOUR_CLOUDFLARE_ACCOUNT_ID>.r2.cloudflarestorage.com",
+    "publicBaseUrl": ""
+  }
 }

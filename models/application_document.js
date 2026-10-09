@@ -4,24 +4,49 @@ module.exports = (sequelize, DataTypes) => {
   const ApplicationDocument = sequelize.define(
     "application_documents",
     {
-      id: { allowNull: false, autoIncrement: true, primaryKey: true, type: DataTypes.INTEGER },
-      fkApplicationId: { type: DataTypes.INTEGER, allowNull: false, field: "fk_application_id" },
-      label: { type: DataTypes.STRING, allowNull: false },
-      status: {
-        type: DataTypes.ENUM("Pending", "Uploaded", "Verified"),
+      id: {
         allowNull: false,
-        defaultValue: "Pending",
+        autoIncrement: true,
+        primaryKey: true,
+        type: DataTypes.INTEGER,
+      },
+      fkApplicationId: {
+        type: DataTypes.INTEGER,
+        allowNull: false,
+        field: "fk_application_id",
+      },
+      title: {
+        type: DataTypes.STRING(255),
+        allowNull: false,
+      },
+      fileUrl: {
+        type: DataTypes.STRING(500),
+        allowNull: false,
+        field: "file_url",
+      },
+      documentType: {
+        type: DataTypes.STRING(100),
+        allowNull: true,
+        field: "document_type",
       },
     },
     {
       tableName: "application_documents",
-      paranoid: true,
       timestamps: true,
       createdAt: "created_at",
       updatedAt: "updated_at",
-      deletedAt: "archived_at",
       underscored: true,
-    },
+      getterMethods: {
+        label() {
+          return this.getDataValue("title");
+        },
+      },
+      setterMethods: {
+        label(val) {
+          this.setDataValue("title", val);
+        },
+      },
+    }
   );
 
   ApplicationDocument.associate = (models) => {

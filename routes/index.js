@@ -16,6 +16,14 @@ const attendanceRouter = require("./attendance");
 const feeRouter = require("./fee");
 const examRouter = require("./exam");
 const timetableRouter = require("./timetable");
+const teacherAbsenceRouter = require("./teacher_absence");
+const dailyLessonRouter = require("./daily_lesson");
+const dailyTestRouter = require("./daily_test");
+const plannedChapterRouter = require("./planned_chapter");
+const settingsRouter = require("./settings");
+const auditRouter = require("./audit");
+const expenseRouter = require("./expense");
+const noticeRouter = require("./notice");
 
 const router = express.Router();
 
@@ -32,7 +40,15 @@ router.use("/parents", parentRouter);
 router.use("/applications", applicationRouter);
 router.use("/attendances", attendanceRouter);
 router.use("/fees", feeRouter);
+router.use("/expenses", expenseRouter);
+router.use("/updates", noticeRouter);
 router.use("/exams", examRouter);
 router.use("/timetable", timetableRouter);
+router.use("/teacher-absences", teacherAbsenceRouter);
+router.use("/daily-lessons", dailyLessonRouter);
+router.use("/daily-tests", dailyTestRouter);
+router.use("/planned-chapters", plannedChapterRouter);
+router.use("/settings", settingsRouter);
+router.use("/audit-logs", auditRouter);
 
 module.exports = router;

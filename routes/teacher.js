@@ -1,33 +1,19 @@
 "use strict";
 
 const express = require("express");
-const router = express.Router();
-const { teacherController } = require("../controllers");
-const { authorizeRoles } = require("../middlewares/authorize_roles");
-const { USER_ROLES } = require("../constants");
+const { authorize } = require("../middlewares/authorize");
 const validate = require("../middlewares/validate");
-const {
-  validateAssignSubjects,
-  validateAssignClasses,
-  validateId,
-} = require("../validations/teacher");
+const { teacherController: c } = require("../controllers");
+const v = require("../validations/teacher");
 
-const staff = [USER_ROLES.MANAGEMENT, USER_ROLES.TEACHER];
-const mgmt = [USER_ROLES.MANAGEMENT];
+const router = express.Router();
+const manage = authorize("teachers.manage");
 
-router.get("/", authorizeRoles(staff), teacherController.list);
-router.get("/:id", authorizeRoles(staff), validate(validateId), teacherController.getById);
-router.post(
-  "/:id/subjects",
-  authorizeRoles(mgmt),
-  validate(validateAssignSubjects),
-  teacherController.assignSubjects,
-);
-router.post(
-  "/:id/classes",
-  authorizeRoles(mgmt),
-  validate(validateAssignClasses),
-  teacherController.assignClasses,
-);
+router.get("/me/schedule", authorize("teachers.self"), validate(v.validateSchedule), c.mySchedule);
+router.get("/", authorize("teachers.read"), c.list);
+router.get("/:id", authorize("teachers.read"), validate(v.validateId), c.getById);
+router.get("/:id/schedule", manage, validate(v.validateTeacherSchedule), c.schedule);
+router.put("/:id/subject", manage, validate(v.validateChangeSubject), c.changeSubject);
+router.put("/:id/classes", manage, validate(v.validateAssignClasses), c.assignClasses);
 
 module.exports = router;

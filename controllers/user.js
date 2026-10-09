@@ -19,7 +19,7 @@ module.exports = {
   },
   create: async (req, res, next) => {
     try {
-      const user = await userService.createStaffUser(req.user.schoolId, req.body);
+      const user = await userService.createStaffUser(req.user, req.body);
       res.status(201).json({ success: true, message: "User created", data: user });
     } catch (err) {
       next(err);

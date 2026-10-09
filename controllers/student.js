@@ -1,12 +1,18 @@
 "use strict";
 
-const { studentService } = require("../services");
+const { studentService, accessService } = require("../services");
+const { USER_ROLES } = require("../constants");
 const { buildPagination } = require("../utils");
 
 module.exports = {
   list: async (req, res, next) => {
     try {
-      const result = await studentService.list(req.user.schoolId, req.query);
+      const scope = {};
+      if (req.user.role === USER_ROLES.PARENT) scope.studentIds = await accessService.linkedStudentIds(req.user);
+      if (req.user.role === USER_ROLES.TEACHER) {
+        scope.classIds = await accessService.teacherClassIds(await accessService.teacherFor(req.user));
+      }
+      const result = await studentService.list(req.user.schoolId, req.query, scope);
       res.status(200).json({
         success: true,
         message: "Students",
@@ -18,6 +24,7 @@ module.exports = {
   },
   getById: async (req, res, next) => {
     try {
+      await accessService.assertStudentAccess(req.user, req.params.id);
       const data = await studentService.getById(req.params.id, req.user.schoolId);
       res.status(200).json({ success: true, message: "Student", data });
     } catch (err) {

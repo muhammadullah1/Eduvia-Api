@@ -1,26 +1,19 @@
 "use strict";
 
 const express = require("express");
-const router = express.Router();
-const { applicationController } = require("../controllers");
-const { authorizeRoles } = require("../middlewares/authorize_roles");
-const { USER_ROLES } = require("../constants");
+const { authorize } = require("../middlewares/authorize");
 const validate = require("../middlewares/validate");
-const {
-  validateCreate,
-  validateUpdate,
-  validateDecide,
-  validateEnroll,
-  validateId,
-} = require("../validations/application");
+const { applicationController: c } = require("../controllers");
+const v = require("../validations/application");
 
-const mgmt = [USER_ROLES.MANAGEMENT];
+const router = express.Router();
+const can = authorize("admissions.manage");
 
-router.get("/", authorizeRoles(mgmt), applicationController.list);
-router.get("/:id", authorizeRoles(mgmt), validate(validateId), applicationController.getById);
-router.post("/", authorizeRoles(mgmt), validate(validateCreate), applicationController.create);
-router.patch("/:id", authorizeRoles(mgmt), validate(validateId), validate(validateUpdate), applicationController.update);
-router.post("/:id/decide", authorizeRoles(mgmt), validate(validateDecide), applicationController.decide);
-router.post("/:id/enroll", authorizeRoles(mgmt), validate(validateEnroll), applicationController.enroll);
+router.get("/", can, c.list);
+router.get("/:id", can, validate(v.validateId), c.getById);
+router.post("/", can, validate(v.validateCreate), c.create);
+router.patch("/:id", can, validate(v.validateId), validate(v.validateUpdate), c.update);
+router.post("/:id/decide", can, validate(v.validateDecide), c.decide);
+router.post("/:id/enroll", can, validate(v.validateEnroll), c.enroll);
 
 module.exports = router;

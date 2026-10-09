@@ -1,19 +1,17 @@
 "use strict";
 
 const express = require("express");
-const router = express.Router();
-const { subjectController } = require("../controllers");
-const { authorizeRoles } = require("../middlewares/authorize_roles");
-const { USER_ROLES } = require("../constants");
+const { authorize } = require("../middlewares/authorize");
 const validate = require("../middlewares/validate");
-const { validateCreate, validateUpdate, validateId } = require("../validations/subject");
+const { subjectController: c } = require("../controllers");
+const v = require("../validations/subject");
 
-const all = [USER_ROLES.MANAGEMENT, USER_ROLES.TEACHER];
-const mgmt = [USER_ROLES.MANAGEMENT];
+const router = express.Router();
+const manage = authorize("academic.manage");
 
-router.get("/", authorizeRoles(all), subjectController.list);
-router.post("/", authorizeRoles(mgmt), validate(validateCreate), subjectController.create);
-router.patch("/:id", authorizeRoles(mgmt), validate(validateId), validate(validateUpdate), subjectController.update);
-router.delete("/:id", authorizeRoles(mgmt), validate(validateId), subjectController.remove);
+router.get("/", authorize("academic.read"), c.list);
+router.post("/", manage, validate(v.validateCreate), c.create);
+router.patch("/:id", manage, validate(v.validateId), validate(v.validateUpdate), c.update);
+router.delete("/:id", manage, validate(v.validateId), c.remove);
 
 module.exports = router;

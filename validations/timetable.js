@@ -5,7 +5,7 @@ const Joi = require("joi");
 module.exports = {
   validateList: {
     query: Joi.object({
-      classId: Joi.number().integer().required(),
+      classId: Joi.number().integer(),
     }),
   },
   validateCreate: {
@@ -13,7 +13,9 @@ module.exports = {
       fkClassId: Joi.number().integer().required(),
       day: Joi.string().required(),
       time: Joi.string().required(),
-      subject: Joi.string().required(),
+      periodIndex: Joi.number().integer().min(1).required(),
+      subject: Joi.string(),
+      fkSubjectId: Joi.number().integer().allow(null),
       teacher: Joi.string().allow("", null),
       fkTeacherId: Joi.number().integer().allow(null),
       room: Joi.string().allow("", null),
@@ -24,7 +26,9 @@ module.exports = {
     body: Joi.object({
       day: Joi.string(),
       time: Joi.string(),
+      periodIndex: Joi.number().integer().min(1),
       subject: Joi.string(),
+      fkSubjectId: Joi.number().integer().allow(null),
       teacher: Joi.string().allow("", null),
       fkTeacherId: Joi.number().integer().allow(null),
       room: Joi.string().allow("", null),

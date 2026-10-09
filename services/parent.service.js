@@ -30,7 +30,7 @@ async function createWithUser(schoolId, payload) {
   const salt = await bcrypt.genSalt(10);
   const hashed = await bcrypt.hash(password || "ChangeMe123!", salt);
 
-  return sequelize.transaction(async (t) => {
+  const { parentRecord, user } = await sequelize.transaction(async (t) => {
     const user = await Users.create(
       {
         fkSchoolId: schoolId,
@@ -53,11 +53,21 @@ async function createWithUser(schoolId, payload) {
       },
       { transaction: t },
     );
-    return Parents.findByPk(parent.id, {
+    const record = await Parents.findByPk(parent.id, {
       include: [{ model: Users, as: "user", attributes: { exclude: ["password"] } }],
       transaction: t,
     });
+    return { parentRecord: record, user };
   });
+
+  try {
+    const authService = require("./auth.service");
+    await authService.sendUserInvitation(user, USER_ROLES.PARENT);
+  } catch (err) {
+    console.error("Failed to send parent invitation email:", err.message);
+  }
+
+  return parentRecord;
 }
 
 async function linkStudent(parentId, schoolId, studentId, isPrimary = false) {
@@ -74,4 +84,14 @@ async function linkStudent(parentId, schoolId, studentId, isPrimary = false) {
   return link;
 }
 
-module.exports = { list, createWithUser, linkStudent };
+/** The signed-in parent's linked children (§12). */
+async function myChildren(user) {
+  const parent = await Parents.findOne({
+    where: { fkUserId: user.id, fkSchoolId: user.schoolId },
+    include: [{ model: Students, as: "students", through: { attributes: ["isPrimary"] } }],
+  });
+  if (!parent) throw new ApiError(404, "Parent profile not found");
+  return parent.students;
+}
+
+module.exports = { myChildren, list, createWithUser, linkStudent };

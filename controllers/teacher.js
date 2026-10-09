@@ -1,46 +1,15 @@
 "use strict";
 
 const { teacherService } = require("../services");
+const { handle } = require("../utils/handler");
 
 module.exports = {
-  list: async (req, res, next) => {
-    try {
-      const data = await teacherService.list(req.user.schoolId);
-      res.status(200).json({ success: true, message: "Teachers", data });
-    } catch (err) {
-      next(err);
-    }
-  },
-  getById: async (req, res, next) => {
-    try {
-      const data = await teacherService.getById(req.params.id, req.user.schoolId);
-      res.status(200).json({ success: true, message: "Teacher", data });
-    } catch (err) {
-      next(err);
-    }
-  },
-  assignSubjects: async (req, res, next) => {
-    try {
-      const data = await teacherService.assignSubjects(
-        req.params.id,
-        req.user.schoolId,
-        req.body.subjectIds,
-      );
-      res.status(200).json({ success: true, message: "Subjects assigned", data });
-    } catch (err) {
-      next(err);
-    }
-  },
-  assignClasses: async (req, res, next) => {
-    try {
-      const data = await teacherService.assignClasses(
-        req.params.id,
-        req.user.schoolId,
-        req.body.classIds,
-      );
-      res.status(200).json({ success: true, message: "Classes assigned", data });
-    } catch (err) {
-      next(err);
-    }
-  },
+  list: handle("Teachers", (req) => teacherService.list(req.user.schoolId)),
+  getById: handle("Teacher", (req) => teacherService.getById(req.params.id, req.user.schoolId)),
+  changeSubject: handle("Teacher subject changed", (req) => teacherService.changeSubject(req.user, req.params.id, req.body)),
+  assignClasses: handle("Classes assigned", (req) => teacherService.assignClasses(req.user, req.params.id, req.body.classIds)),
+  mySchedule: handle("Schedule", (req) => teacherService.mySchedule(req.user, req.query.date)),
+  schedule: handle("Schedule", async (req) =>
+    teacherService.scheduleFor(await teacherService.getById(req.params.id, req.user.schoolId), req.query.date),
+  ),
 };

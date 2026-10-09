@@ -3,6 +3,14 @@
 const { parentService } = require("../services");
 
 module.exports = {
+  myChildren: async (req, res, next) => {
+    try {
+      const data = await parentService.myChildren(req.user);
+      res.status(200).json({ success: true, message: "Children", data });
+    } catch (err) {
+      next(err);
+    }
+  },
   list: async (req, res, next) => {
     try {
       const data = await parentService.list(req.user.schoolId);

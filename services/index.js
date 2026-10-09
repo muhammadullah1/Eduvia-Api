@@ -16,4 +16,13 @@ module.exports = {
   examService: require("./exam.service"),
   timetableService: require("./timetable.service"),
   auditService: require("./audit.service"),
+  teacherAbsenceService: require("./teacher_absence.service"),
+  dailyLessonService: require("./daily_lesson.service"),
+  dailyTestService: require("./daily_test.service"),
+  plannedChapterService: require("./planned_chapter.service"),
+  settingsService: require("./settings.service"),
+  accessService: require("./access.service"),
+  expenseService: require("./expense.service"),
+  noticeService: require("./notice.service"),
+  emailService: require("./email.service"),
 };

@@ -19,7 +19,7 @@ async function list(schoolId, { status } = {}) {
   return Applications.findAll({
     where,
     include: [{ model: ApplicationDocuments, as: "documents" }],
-    order: [["submittedOn", "DESC"], ["id", "DESC"]],
+    order: [["created_at", "DESC"], ["id", "DESC"]],
   });
 }
 
