@@ -49,13 +49,38 @@ function assertSubmitted(row) {
   }
 }
 
-async function list(schoolId, { status, q, page = 1, pageSize = 50 } = {}) {
+async function list(
+  schoolId,
+  { status, q, page = 1, pageSize = 10, submitted, hasInterview } = {},
+) {
   const where = { fkSchoolId: schoolId };
   if (status) where.status = status;
 
+  if (submitted === "false" || submitted === false) {
+    where.submittedOn = null;
+  } else if (submitted === "true" || submitted === true) {
+    where.submittedOn = { [Op.ne]: null };
+  }
+
+  if (hasInterview === "true" || hasInterview === true) {
+    const interviewClause = {
+      [Op.or]: [
+        { interviewDate: { [Op.ne]: null } },
+        { interviewScore: { [Op.ne]: null } },
+        { interviewResult: { [Op.ne]: null } },
+      ],
+    };
+    if (where[Op.and]) {
+      where[Op.and].push(interviewClause);
+    } else {
+      where[Op.and] = [interviewClause];
+    }
+  }
+
   const term = q && String(q).trim();
   if (term) {
-    where[Op.or] = [
+    const searchClause = {
+      [Op.or]: [
       { applicantFirstName: { [Op.iLike]: `%${term}%` } },
       { applicantLastName: { [Op.iLike]: `%${term}%` } },
       { parentName: { [Op.iLike]: `%${term}%` } },
@@ -70,10 +95,16 @@ async function list(schoolId, { status, q, page = 1, pageSize = 50 } = {}) {
         ),
         { [Op.iLike]: `%${term}%` },
       ),
-    ];
+      ],
+    };
+    if (where[Op.and]) {
+      where[Op.and].push(searchClause);
+    } else {
+      where[Op.and] = [searchClause];
+    }
   }
 
-  const limit = Math.min(Math.max(Number(pageSize) || 50, 1), 200);
+  const limit = Math.min(Math.max(Number(pageSize) || 10, 1), 200);
   const offset = (Math.max(Number(page) || 1, 1) - 1) * limit;
 
   const { rows, count } = await Applications.findAndCountAll({
@@ -252,6 +283,11 @@ async function createDraft(schoolId, data = {}) {
         previousClass: columns.previousClass || null,
         guardianRelation: columns.guardianRelation || null,
         guardianAddress: columns.guardianAddress || null,
+        interviewType: columns.interviewType || null,
+        interviewDate: columns.interviewDate || null,
+        interviewScore: columns.interviewScore || null,
+        interviewResult: columns.interviewResult || null,
+        notes: columns.notes || null,
         fkSchoolId: schoolId,
         fkSessionId: await currentSessionId(schoolId, t),
         status: APPLICATION_STATUS.NEW,

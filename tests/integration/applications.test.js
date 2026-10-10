@@ -1,6 +1,7 @@
 "use strict";
 
 const applicationService = require("../../services/application.service");
+const { serializeApplication } = require("../../utils/applicationSerializer");
 const { sequelize, Schools, AcademicSessions, Users, Classes } = require("../../models");
 const { USER_ROLES } = require("../../constants");
 const ApiError = require("../../utils/ApiError");
@@ -96,6 +97,44 @@ describe("application service", () => {
     ).rejects.toMatchObject({ statusCode: 400 });
   });
 
+  test("createDraft accepts wizard payload with interview and notes fields", async () => {
+    const fx = await buildFixture();
+    const draft = await applicationService.createDraft(fx.school.id, {
+      name: "Wizard Applicant",
+      fkClassId: fx.klass.id,
+      guardian: "",
+      phone: "030078678767",
+      email: `wizard-${fx.stamp}@test.local`,
+      dob: "2020-01-01",
+      gender: "Male",
+      address: "Test address",
+      interviewType: "Interview",
+      interviewDate: null,
+      interviewScore: "",
+      interviewResult: "",
+      notes: "",
+      documents: [{ label: "Birth Certificate / B-Form", status: "Pending" }],
+    });
+    expect(draft.id).toBeTruthy();
+    expect(draft.documents.length).toBeGreaterThan(0);
+  });
+
+  test("list defaults to page 1 and pageSize 10", async () => {
+    const fx = await buildFixture();
+    for (let i = 0; i < 12; i += 1) {
+      await applicationService.createDraft(fx.school.id, {
+        name: `Paged Applicant ${i}`,
+        fkClassId: fx.klass.id,
+      });
+    }
+    const page1 = await applicationService.list(fx.school.id, { page: 1 });
+    expect(page1.pageSize).toBe(10);
+    expect(page1.rows.length).toBe(10);
+    expect(page1.count).toBeGreaterThanOrEqual(12);
+    const page2 = await applicationService.list(fx.school.id, { page: 2 });
+    expect(page2.rows.length).toBeGreaterThanOrEqual(2);
+  });
+
   test("list supports search and tenant isolation", async () => {
     const fx = await buildFixture();
     const other = await buildFixture();
@@ -139,6 +178,22 @@ describe("application service", () => {
     await expect(
       applicationService.markUnderReview(draft.id, fx.school.id),
     ).rejects.toBeInstanceOf(ApiError);
+  });
+
+  test("serializer exposes stable API field names", async () => {
+    const fx = await buildFixture();
+    const draft = await applicationService.createDraft(fx.school.id, {
+      name: "API Shape",
+      fkClassId: fx.klass.id,
+      guardian: "Parent",
+      phone: "03001112222",
+    });
+    const dto = serializeApplication(draft);
+    expect(dto.id).toBe(draft.id);
+    expect(dto.name).toContain("API");
+    expect(dto.guardian).toBe("Parent");
+    expect(dto.phone).toBe("03001112222");
+    expect(Array.isArray(dto.documents)).toBe(true);
   });
 
   test("submit rejects incomplete draft", async () => {
