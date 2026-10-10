@@ -24,7 +24,7 @@ async function list(schoolId) {
 
 async function createWithUser(schoolId, payload) {
   const { firstName, lastName, email, phone, password, relation, gender } = payload;
-  const existing = await Users.findOne({ where: { email: email.toLowerCase() } });
+  const existing = await Users.findOne({ where: { email: email.toLowerCase(), fkSchoolId: schoolId } });
   if (existing) throw new ApiError(409, "Email already in use");
 
   const salt = await bcrypt.genSalt(10);
@@ -49,7 +49,9 @@ async function createWithUser(schoolId, payload) {
       {
         fkUserId: user.id,
         fkSchoolId: schoolId,
-        relation: relation || "Guardian",
+        primaryContactNumber: phone || null,
+        ...(relation === "Father" ? { fatherName: `${firstName} ${lastName}`.trim() } : {}),
+        ...(relation === "Mother" ? { motherName: `${firstName} ${lastName}`.trim() } : {}),
       },
       { transaction: t },
     );

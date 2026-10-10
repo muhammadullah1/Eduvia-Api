@@ -66,6 +66,21 @@ module.exports = (sequelize, DataTypes) => {
         type: DataTypes.TEXT,
         allowNull: true,
       },
+      status: {
+        type: DataTypes.ENUM("Paid", "Pending"),
+        allowNull: false,
+        defaultValue: "Paid",
+      },
+      allocationMode: {
+        type: DataTypes.ENUM("auto", "manual"),
+        allowNull: false,
+        defaultValue: "auto",
+        field: "allocation_mode",
+      },
+      period: {
+        type: DataTypes.STRING(255),
+        allowNull: true,
+      },
     },
     {
       tableName: "fee_payments",

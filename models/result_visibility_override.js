@@ -40,6 +40,16 @@ module.exports = (sequelize, DataTypes) => {
         defaultValue: sequelize.literal("CURRENT_TIMESTAMP"),
         field: "granted_at",
       },
+      revokedAt: {
+        type: DataTypes.DATE,
+        allowNull: true,
+        field: "revoked_at",
+      },
+      fkRevokedByUserId: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+        field: "fk_revoked_by_user_id",
+      },
     },
     {
       tableName: "result_visibility_overrides",

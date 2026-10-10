@@ -30,7 +30,7 @@ module.exports = (sequelize, DataTypes) => {
         allowNull: false,
         field: "fk_subject_id",
       },
-      dayOfWeek: {
+      day: {
         type: DataTypes.ENUM(
           "Monday",
           "Tuesday",
@@ -71,16 +71,6 @@ module.exports = (sequelize, DataTypes) => {
       updatedAt: "updated_at",
       deletedAt: "archived_at",
       underscored: true,
-      getterMethods: {
-        day() {
-          return this.getDataValue("dayOfWeek");
-        },
-      },
-      setterMethods: {
-        day(val) {
-          this.setDataValue("dayOfWeek", val);
-        },
-      },
     }
   );
 

@@ -10,10 +10,20 @@ module.exports = (sequelize, DataTypes) => {
         primaryKey: true,
         type: DataTypes.INTEGER,
       },
+      fkSchoolId: {
+        type: DataTypes.INTEGER,
+        allowNull: false,
+        field: "fk_school_id",
+      },
       fkExamId: {
         type: DataTypes.INTEGER,
         allowNull: false,
         field: "fk_exam_id",
+      },
+      fkTeacherId: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+        field: "fk_teacher_id",
       },
       fkClassId: {
         type: DataTypes.INTEGER,
@@ -38,7 +48,7 @@ module.exports = (sequelize, DataTypes) => {
         field: "passing_marks",
       },
       status: {
-        type: DataTypes.ENUM("Draft", "Submitted", "Approved", "Published"),
+        type: DataTypes.ENUM("Draft", "Submitted", "Verified", "Published"),
         allowNull: false,
         defaultValue: "Draft",
       },
@@ -51,6 +61,16 @@ module.exports = (sequelize, DataTypes) => {
         type: DataTypes.INTEGER,
         allowNull: true,
         field: "fk_approved_by_user_id",
+      },
+      publishedAt: {
+        type: DataTypes.DATE,
+        allowNull: true,
+        field: "published_at",
+      },
+      fkPublishedByUserId: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+        field: "fk_published_by_user_id",
       },
     },
     {

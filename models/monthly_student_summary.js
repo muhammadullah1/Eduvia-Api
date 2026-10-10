@@ -20,9 +20,53 @@ module.exports = (sequelize, DataTypes) => {
         allowNull: false,
         field: "fk_student_id",
       },
+      fkClassId: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+        field: "fk_class_id",
+      },
+      fkSubjectId: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+        field: "fk_subject_id",
+      },
       month: {
         type: DataTypes.STRING(7),
         allowNull: false,
+      },
+      testsScheduled: {
+        type: DataTypes.INTEGER,
+        allowNull: false,
+        defaultValue: 0,
+        field: "tests_scheduled",
+      },
+      testsTaken: {
+        type: DataTypes.INTEGER,
+        allowNull: false,
+        defaultValue: 0,
+        field: "tests_taken",
+      },
+      passedCount: {
+        type: DataTypes.INTEGER,
+        allowNull: false,
+        defaultValue: 0,
+        field: "passed_count",
+      },
+      failedCount: {
+        type: DataTypes.INTEGER,
+        allowNull: false,
+        defaultValue: 0,
+        field: "failed_count",
+      },
+      status: {
+        type: DataTypes.STRING(20),
+        allowNull: true,
+      },
+      flaggedForFollowUp: {
+        type: DataTypes.BOOLEAN,
+        allowNull: false,
+        defaultValue: false,
+        field: "flagged_for_follow_up",
       },
       attendancePercentage: {
         type: DataTypes.DECIMAL(5, 2),

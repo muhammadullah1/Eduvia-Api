@@ -20,6 +20,10 @@ const bodies = {
     dueDay: Joi.number().integer().min(1).max(28),
     maxAdvanceMonths: Joi.number().integer().min(0).max(24),
   }).min(1),
+  [SETTING_KEYS.ADMISSION]: Joi.object({
+    prefix: Joi.string().max(20),
+    digits: Joi.number().integer().min(1).max(8),
+  }).min(1),
 };
 
 module.exports = {

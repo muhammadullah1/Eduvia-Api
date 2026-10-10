@@ -12,6 +12,7 @@ router.post("/months/generate", authorize("fees.months.generate"), validate(v.va
 router.get("/months", authorize("fees.months.read"), validate(v.validateMonths), c.listMonths);
 router.get("/payments", authorize("fees.payments.read"), validate(v.validateList), c.listPayments);
 router.post("/payments", authorize("fees.payments.record"), validate(v.validateRecord), c.recordPayment);
+router.post("/payments/import", authorize("fees.payments.record"), validate(v.validateImport), c.importPayments);
 router.get("/payments/:id/receipt", authorize("fees.payments.read"), validate(v.validateId), c.receipt);
 router.post("/payments/:id/confirm", authorize("fees.payments.confirm"), validate(v.validateId), c.confirmPayment);
 router.get("/collections/mine", authorize("fees.collections.mine"), validate(v.validateDay), c.myCollections);

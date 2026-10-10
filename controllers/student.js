@@ -47,6 +47,22 @@ module.exports = {
       next(err);
     }
   },
+  changeStatus: async (req, res, next) => {
+    try {
+      const data = await studentService.changeStatus(req.user, req.params.id, req.body);
+      res.status(200).json({ success: true, message: "Student status updated", data });
+    } catch (err) {
+      next(err);
+    }
+  },
+  promote: async (req, res, next) => {
+    try {
+      const data = await studentService.promote(req.user, req.params.id, req.body);
+      res.status(200).json({ success: true, message: "Student promoted", data });
+    } catch (err) {
+      next(err);
+    }
+  },
   remove: async (req, res, next) => {
     try {
       await studentService.remove(req.params.id, req.user.schoolId);

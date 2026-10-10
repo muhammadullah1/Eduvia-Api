@@ -20,6 +20,11 @@ module.exports = (sequelize, DataTypes) => {
         allowNull: false,
         field: "fk_session_id",
       },
+      fkClassId: {
+        type: DataTypes.INTEGER,
+        allowNull: false,
+        field: "fk_class_id",
+      },
       name: {
         type: DataTypes.STRING(100),
         allowNull: false,
@@ -86,6 +91,14 @@ module.exports = (sequelize, DataTypes) => {
     Exam.hasMany(models.MarkSheets, {
       foreignKey: "fkExamId",
       as: "markSheets",
+    });
+    Exam.hasMany(models.MarkSheets, {
+      foreignKey: "fkExamId",
+      as: "sheets",
+    });
+    Exam.belongsTo(models.Classes, {
+      foreignKey: "fkClassId",
+      as: "class",
     });
     if (models.ResultVisibilityOverrides) {
       Exam.hasMany(models.ResultVisibilityOverrides, {

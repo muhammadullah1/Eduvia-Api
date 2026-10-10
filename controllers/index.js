@@ -23,4 +23,6 @@ module.exports = {
   auditController: require("./audit"),
   expenseController: require("./expense"),
   noticeController: require("./notice"),
+  leaveController: require("./leave"),
+  reportController: require("./report"),
 };

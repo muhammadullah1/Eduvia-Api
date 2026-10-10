@@ -27,12 +27,41 @@ module.exports = (sequelize, DataTypes) => {
       },
       fkTeacherId: {
         type: DataTypes.INTEGER,
-        allowNull: false,
+        allowNull: true,
         field: "fk_teacher_id",
+      },
+      fkScheduleId: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+        field: "fk_schedule_id",
       },
       date: {
         type: DataTypes.DATEONLY,
         allowNull: false,
+      },
+      month: {
+        type: DataTypes.STRING(7),
+        allowNull: false,
+      },
+      weekOfMonth: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+        field: "week_of_month",
+      },
+      status: {
+        type: DataTypes.ENUM("Scheduled", "MarksEntered", "Published"),
+        allowNull: false,
+        defaultValue: "Scheduled",
+      },
+      publishedAt: {
+        type: DataTypes.DATE,
+        allowNull: true,
+        field: "published_at",
+      },
+      fkPublishedByUserId: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+        field: "fk_published_by_user_id",
       },
       totalMarks: {
         type: DataTypes.DECIMAL(5, 2),

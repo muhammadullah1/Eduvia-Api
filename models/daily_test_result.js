@@ -35,6 +35,11 @@ module.exports = (sequelize, DataTypes) => {
         type: DataTypes.STRING(255),
         allowNull: true,
       },
+      fkEnteredByUserId: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+        field: "fk_entered_by_user_id",
+      },
     },
     {
       tableName: "daily_test_results",

@@ -12,7 +12,7 @@ const {
   Users,
   sequelize,
 } = require("../models");
-const { USER_ROLES, SHEET_STATUS, RESULT_FEE_RULES, SETTING_KEYS, STUDENT_STATUS } = require("../constants");
+const { USER_ROLES, SHEET_STATUS, RESULT_FEE_RULES, SETTING_KEYS, STUDENT_STATUS, GRADE_BANDS } = require("../constants");
 const ApiError = require("../utils/ApiError");
 const accessService = require("./access.service");
 const auditService = require("./audit.service");
@@ -91,10 +91,8 @@ async function create(actor, { classId, name, feeMonth, sessionId, subjects }) {
         {
           fkSchoolId: actor.schoolId,
           fkExamId: exam.id,
-          examName: name,
           fkClassId: klass.id,
           fkSubjectId: subject.id,
-          subject: subject.name,
           fkTeacherId: item.teacherId || (slot ? slot.fkTeacherId : null),
           maxScore: item.maxScore || 100,
           status: SHEET_STATUS.DRAFT,
@@ -156,7 +154,7 @@ async function transition(user, sheetId, action) {
     const extra = to === SHEET_STATUS.PUBLISHED ? { publishedAt: new Date(), fkPublishedByUserId: user.id } : {};
     await sheet.update({ status: to, ...extra });
   }
-  await auditService.record(user, `${action} mark sheet #${sheet.id} (${sheet.subject}, ${sheet.examName})`, {
+  await auditService.record(user, `${action} mark sheet #${sheet.id} (subject #${sheet.fkSubjectId}, exam #${sheet.fkExamId})`, {
     entityType: "mark_sheet",
     entityId: sheet.id,
   });
@@ -189,7 +187,16 @@ async function parentResults(user, studentId) {
   const { feeRule } = await settingsService.get(user.schoolId, SETTING_KEYS.RESULT_VISIBILITY);
   const exams = await Exams.findAll({
     where: { fkSchoolId: user.schoolId, fkClassId: student.fkClassId },
-    include: [{ model: MarkSheets, as: "sheets", where: { status: SHEET_STATUS.PUBLISHED }, required: true, include: [{ model: MarkSheetRows, as: "rows", where: { fkStudentId: student.id }, required: false }] }],
+    include: [{
+      model: MarkSheets,
+      as: "sheets",
+      where: { status: SHEET_STATUS.PUBLISHED },
+      required: true,
+      include: [
+        { model: Subjects, as: "subject", attributes: ["id", "name"] },
+        { model: MarkSheetRows, as: "rows", where: { fkStudentId: student.id }, required: false },
+      ],
+    }],
     order: [["id", "DESC"]],
   });
   const out = [];
@@ -203,7 +210,7 @@ async function parentResults(user, studentId) {
       withheldReason: gate.visible ? null : "Result withheld until fees are cleared. Please contact the school office.",
       subjects: gate.visible
         ? exam.sheets.map((s) => ({
-            subject: s.subject,
+            subject: s.subject ? s.subject.name : null,
             maxScore: Number(s.maxScore),
             score: s.rows[0] && s.rows[0].score != null ? Number(s.rows[0].score) : null,
             publishedAt: s.publishedAt,
@@ -284,6 +291,71 @@ async function listOverrides(user, { examId } = {}) {
   });
 }
 
+function gradeFor(percent) {
+  const band = GRADE_BANDS.find((item) => percent >= item.min);
+  return band ? band.grade : "F";
+}
+
+/** Published result for one student. Rank is omitted until a tie policy exists. */
+async function dmc(user, examId, studentId) {
+  const student = await accessService.assertStudentAccess(user, studentId);
+  const exam = await Exams.findOne({
+    where: { id: examId, fkSchoolId: user.schoolId },
+    include: [{
+      model: MarkSheets,
+      as: "sheets",
+      where: { status: SHEET_STATUS.PUBLISHED },
+      required: false,
+      include: [
+        { model: Subjects, as: "subject", attributes: ["id", "name"] },
+        { model: MarkSheetRows, as: "rows", where: { fkStudentId: student.id }, required: false },
+      ],
+    }],
+  });
+  if (!exam) throw new ApiError(404, "Exam not found");
+  if (user.role === USER_ROLES.PARENT) {
+    const { feeRule } = await settingsService.get(user.schoolId, SETTING_KEYS.RESULT_VISIBILITY);
+    const gate = await visibility(user.schoolId, exam, student.id, feeRule);
+    if (!gate.visible) throw new ApiError(403, "Result withheld until fees are cleared. Please contact the school office.");
+  }
+  let sheets = exam.sheets || [];
+  if (user.role === USER_ROLES.TEACHER) {
+    const teacher = await accessService.teacherFor(user);
+    const classIds = await accessService.teacherClassIds(teacher);
+    if (!classIds.includes(student.fkClassId)) throw new ApiError(403, "You can only open results for your own classes.");
+    sheets = sheets.filter((sheet) => sheet.fkSubjectId === teacher.fkSubjectId);
+  }
+  if (!sheets.length) throw new ApiError(404, "No published result for this student");
+  const subjects = sheets.map((sheet) => {
+    const row = sheet.rows[0];
+    const score = row && row.score != null && !row.isAbsent ? Number(row.score) : null;
+    const max = Number(sheet.totalMarks);
+    const passing = Number(sheet.passingMarks);
+    const passed = score != null && score >= passing;
+    return {
+      subject: sheet.subject ? sheet.subject.name : null,
+      score,
+      max,
+      passing,
+      absent: Boolean(row && row.isAbsent),
+      result: row && row.isAbsent ? "Absent" : (passed ? "Pass" : "Fail"),
+    };
+  });
+  const total = subjects.reduce((sum, item) => sum + (item.score || 0), 0);
+  const max = subjects.reduce((sum, item) => sum + item.max, 0);
+  const percentage = max ? Math.round((total / max) * 10000) / 100 : null;
+  return {
+    student: { id: student.id, name: `${student.firstName} ${student.lastName}`, admissionNo: student.admissionNo },
+    exam: { id: exam.id, name: exam.name },
+    subjects,
+    total,
+    max,
+    percentage,
+    grade: percentage == null ? null : gradeFor(percentage),
+    passed: subjects.every((item) => item.result === "Pass"),
+  };
+}
+
 module.exports = {
   list,
   create,
@@ -297,4 +369,5 @@ module.exports = {
   revokeOverride,
   listOverrides,
   feeCleared,
+  dmc,
 };

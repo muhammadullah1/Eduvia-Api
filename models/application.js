@@ -39,6 +39,11 @@ module.exports = (sequelize, DataTypes) => {
         allowNull: false,
         field: "date_of_birth",
       },
+      fkClassId: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+        field: "fk_class_id",
+      },
       gradeApplyingFor: {
         type: DataTypes.STRING(50),
         allowNull: false,
@@ -60,17 +65,62 @@ module.exports = (sequelize, DataTypes) => {
         field: "parent_phone",
       },
       status: {
-        type: DataTypes.ENUM(
-          "Inquiry",
-          "Applied",
-          "UnderReview",
-          "InterviewScheduled",
-          "Approved",
-          "Rejected",
-          "Enrolled"
-        ),
+        type: DataTypes.ENUM("New", "Review", "Waitlist", "Enrolled", "Rejected"),
         allowNull: false,
-        defaultValue: "Inquiry",
+        defaultValue: "New",
+      },
+      decision: {
+        type: DataTypes.STRING(20),
+        allowNull: true,
+      },
+      address: {
+        type: DataTypes.TEXT,
+        allowNull: true,
+      },
+      previousSchool: {
+        type: DataTypes.STRING(255),
+        allowNull: true,
+        field: "previous_school",
+      },
+      previousClass: {
+        type: DataTypes.STRING(100),
+        allowNull: true,
+        field: "previous_class",
+      },
+      guardianRelation: {
+        type: DataTypes.STRING(50),
+        allowNull: true,
+        field: "guardian_relation",
+      },
+      guardianAddress: {
+        type: DataTypes.TEXT,
+        allowNull: true,
+        field: "guardian_address",
+      },
+      interviewType: {
+        type: DataTypes.STRING(50),
+        allowNull: true,
+        field: "interview_type",
+      },
+      interviewDate: {
+        type: DataTypes.DATEONLY,
+        allowNull: true,
+        field: "interview_date",
+      },
+      interviewScore: {
+        type: DataTypes.STRING(20),
+        allowNull: true,
+        field: "interview_score",
+      },
+      interviewResult: {
+        type: DataTypes.STRING(50),
+        allowNull: true,
+        field: "interview_result",
+      },
+      submittedOn: {
+        type: DataTypes.DATEONLY,
+        allowNull: true,
+        field: "submitted_on",
       },
       notes: {
         type: DataTypes.TEXT,
@@ -115,6 +165,10 @@ module.exports = (sequelize, DataTypes) => {
     Application.belongsTo(models.AcademicSessions, {
       foreignKey: "fkSessionId",
       as: "session",
+    });
+    Application.belongsTo(models.Classes, {
+      foreignKey: "fkClassId",
+      as: "class",
     });
     Application.belongsTo(models.Students, {
       foreignKey: "enrolledStudentId",

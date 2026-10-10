@@ -16,7 +16,7 @@ module.exports = {
       studentId: id.required(),
       amount: Joi.number().positive().precision(2).required(),
       paidOn: isoDay,
-      method: Joi.string().valid("Cash", "Bank transfer", "Cheque", "Online").default("Cash"),
+      method: Joi.string().valid("Cash", "BankTransfer", "Cheque", "Online").default("Cash"),
       feeType: Joi.string().max(64).default("Tuition"),
       notes: Joi.string().max(500).allow("", null),
       idempotencyKey: Joi.string().max(128),
@@ -28,4 +28,10 @@ module.exports = {
   validateDay: { query: Joi.object({ date: isoDay }) },
   validateCollections: { query: Joi.object({ date: isoDay, recordedBy: id }) },
   validateSummary: { query: Joi.object({ month: isoMonth }) },
+  validateImport: {
+    body: Joi.object({
+      filename: Joi.string().max(255).required(),
+      contentBase64: Joi.string().required(),
+    }),
+  },
 };

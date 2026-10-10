@@ -15,6 +15,6 @@ module.exports = {
   }),
   mark: handle("Attendance marked", async (req) => {
     await accessService.assertTeacherClass(req.user, req.body.classId, req.body.date);
-    return attendanceService.markMany(req.user.schoolId, req.body);
+    return attendanceService.markMany(req.user.schoolId, req.body, req.user);
   }),
 };

@@ -96,7 +96,7 @@ module.exports = (sequelize, DataTypes) => {
       foreignKey: "fkSchoolId",
       as: "parents",
     });
-    School.hasOne(models.SchoolSettings, {
+    School.hasMany(models.SchoolSettings, {
       foreignKey: "fkSchoolId",
       as: "settings",
     });

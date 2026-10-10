@@ -2,6 +2,7 @@
 
 const bcrypt = require("bcryptjs");
 const { Users, Teachers, Subjects, TeacherSubjectAssignments, sequelize } = require("../models");
+const authService = require("./auth.service");
 const { today } = require("../utils/dates");
 const { USER_ROLES, USER_STATUS } = require("../constants");
 const ApiError = require("../utils/ApiError");
@@ -17,15 +18,22 @@ async function findById(id, options = {}) {
 }
 
 async function findByEmail(email, options = {}) {
+  const { schoolId, ...findOptions } = options;
+  const where = { email };
+  if (schoolId) where.fkSchoolId = schoolId;
   return Users.findOne({
     ...defaultExcludePassword,
-    ...options,
-    where: { email },
+    ...findOptions,
+    where,
   });
 }
 
 async function getByEmailWithPassword(email) {
-  return Users.findOne({ where: { email } });
+  const rows = await Users.findAll({ where: { email } });
+  if (rows.length > 1) {
+    throw new ApiError(409, "This email is registered at more than one school");
+  }
+  return rows[0] || null;
 }
 
 async function getByIdWithPassword(id) {
@@ -73,7 +81,7 @@ async function createStaffUser(actor, payload) {
     const subject = subjectId && (await Subjects.findOne({ where: { id: subjectId, fkSchoolId: schoolId } }));
     if (!subject) throw new ApiError(400, "A teacher must be created with one subject.");
   }
-  const existing = await findByEmail(email.toLowerCase());
+  const existing = await findByEmail(email.toLowerCase(), { schoolId });
   if (existing) throw new ApiError(409, "Email already in use");
 
   const hashed = await bcrypt.hash(password, await bcrypt.genSalt(10));
@@ -118,7 +126,6 @@ async function createStaffUser(actor, payload) {
   });
 
   try {
-    const authService = require("./auth.service");
     await authService.sendUserInvitation(user, role);
   } catch (err) {
     console.error("Failed to send staff invitation email:", err.message);

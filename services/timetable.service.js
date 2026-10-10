@@ -28,7 +28,7 @@ async function listByClass(user, classId) {
         include: [{ model: Users, as: "user", attributes: ["firstName", "lastName", "email"] }],
       },
     ],
-    order: [["dayOfWeek", "ASC"], ["periodIndex", "ASC"]],
+    order: [["day", "ASC"], ["periodIndex", "ASC"]],
   });
 }
 

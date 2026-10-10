@@ -34,6 +34,10 @@ const PERMISSIONS = {
 
   "students.read": [SA, OPS, ACC, TCH, PAR],
   "students.manage": [SA, OPS],
+  "leave.read": [SA, OPS, TCH, PAR],
+  "leave.request": [SA, OPS, PAR],
+  "leave.review": [SA, OPS],
+  "reports.dashboard": [SA, OPS, TCH, PAR],
   "parents.manage": [SA, OPS],
   "admissions.manage": [SA, OPS],
 

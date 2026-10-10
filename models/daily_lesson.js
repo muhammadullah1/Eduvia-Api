@@ -47,9 +47,39 @@ module.exports = (sequelize, DataTypes) => {
         type: DataTypes.TEXT,
         allowNull: true,
       },
+      classwork: {
+        type: DataTypes.TEXT,
+        allowNull: true,
+      },
       notes: {
         type: DataTypes.TEXT,
         allowNull: true,
+      },
+      reviewStatus: {
+        type: DataTypes.ENUM("Submitted", "Approved", "Rejected"),
+        allowNull: false,
+        defaultValue: "Submitted",
+        field: "review_status",
+      },
+      fkSubmittedByUserId: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+        field: "fk_submitted_by_user_id",
+      },
+      fkReviewedByUserId: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+        field: "fk_reviewed_by_user_id",
+      },
+      reviewedAt: {
+        type: DataTypes.DATE,
+        allowNull: true,
+        field: "reviewed_at",
+      },
+      reviewNote: {
+        type: DataTypes.TEXT,
+        allowNull: true,
+        field: "review_note",
       },
     },
     {

@@ -37,4 +37,8 @@ module.exports = {
   validateRevoke: { params: Joi.object({ overrideId: id.required() }) },
   validateOverrideList: { query: Joi.object({ examId: id }) },
   validateParentResults: { query: Joi.object({ studentId: id.required() }) },
+  validateDmc: {
+    ...idParam,
+    query: Joi.object({ studentId: id.required(), format: Joi.string().valid("pdf", "json") }),
+  },
 };

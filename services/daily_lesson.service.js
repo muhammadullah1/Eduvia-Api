@@ -68,15 +68,11 @@ async function create(user, data) {
     fkSubjectId: chapter.fkSubjectId,
     fkTeacherId: teacher.id,
     fkPlannedChapterId: chapter.id,
-    chapter: chapter.title,
-    title: data.title || null,
+    title: data.title || chapter.title,
     date: data.date,
-    periodIndex: data.periodIndex || null,
     classwork: data.classwork || null,
     homework: data.homework || null,
     remarks: data.remarks || null,
-    progress: data.progress ?? 0,
-    status: data.status || "In progress",
     reviewStatus: LESSON_REVIEW_STATUS.SUBMITTED,
     fkSubmittedByUserId: user.id,
   });
@@ -87,13 +83,18 @@ async function update(user, id, data) {
   const teacher = await accessService.teacherFor(user);
   if (row.fkTeacherId !== teacher.id) throw new ApiError(403, "You can only edit your own updates.");
   if (row.reviewStatus === LESSON_REVIEW_STATUS.APPROVED) throw new ApiError(400, "Approved updates are locked.");
-  const changes = { ...data, reviewStatus: LESSON_REVIEW_STATUS.SUBMITTED, reviewNote: null };
+  const changes = {
+    reviewStatus: LESSON_REVIEW_STATUS.SUBMITTED,
+    reviewNote: null,
+  };
+  for (const key of ["title", "classwork", "homework", "remarks"]) {
+    if (data[key] !== undefined) changes[key] = data[key];
+  }
   if (data.plannedChapterId) {
     const chapter = await chapterFor(user.schoolId, data.plannedChapterId, row.fkClassId);
     if (chapter.fkSubjectId !== row.fkSubjectId) throw new ApiError(400, "Chapter belongs to a different subject.");
-    Object.assign(changes, { fkPlannedChapterId: chapter.id, chapter: chapter.title });
+    Object.assign(changes, { fkPlannedChapterId: chapter.id });
   }
-  delete changes.plannedChapterId;
   await row.update(changes);
   return getById(id, user.schoolId);
 }

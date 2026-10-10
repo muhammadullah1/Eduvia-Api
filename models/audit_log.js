@@ -26,7 +26,7 @@ module.exports = (sequelize, DataTypes) => {
       },
       entityType: {
         type: DataTypes.STRING(100),
-        allowNull: false,
+        allowNull: true,
         field: "entity_type",
       },
       entityId: {
@@ -53,6 +53,15 @@ module.exports = (sequelize, DataTypes) => {
         type: DataTypes.STRING(500),
         allowNull: true,
         field: "user_agent",
+      },
+      actorLabel: {
+        type: DataTypes.STRING(255),
+        allowNull: true,
+        field: "actor_label",
+      },
+      metadata: {
+        type: DataTypes.JSONB,
+        allowNull: true,
       },
     },
     {

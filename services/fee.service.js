@@ -32,9 +32,18 @@ const { feeMonthStatus, planOldestFirst, validateManualPlan, outstanding, cents,
 const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const monthLabel = (month) => `${MONTH_NAMES[Number(String(month).slice(5, 7)) - 1]} ${String(month).slice(0, 4)}`;
 
+/** Fee months are stored as YYYY-MM. The column is seven characters. */
+function monthStamp(value) {
+  return String(value).slice(0, 7);
+}
+
+function stepMonth(stamp, count = 1) {
+  return monthStamp(addMonths(`${monthStamp(stamp)}-01`, count));
+}
+
 const studentAttributes = ["id", "firstName", "lastName", "admissionNo", "fkClassId"];
 
-function presentMonth(row, currentMonth = firstOfMonth(today())) {
+function presentMonth(row, currentMonth = monthStamp(today())) {
   const plain = row.get ? row.get({ plain: true }) : row;
   const amountDue = Number(plain.netAmount ?? plain.amountDue ?? 0);
   const amountPaid = Number(plain.paidAmount ?? plain.amountPaid ?? 0);
@@ -62,13 +71,22 @@ function isoDay(value) {
   return value instanceof Date ? value.toISOString().slice(0, 10) : String(value).slice(0, 10);
 }
 
+function ledgerView(row) {
+  return {
+    id: row.id,
+    month: row.month,
+    amountDue: Number(row.getDataValue("netAmount")),
+    amountPaid: Number(row.getDataValue("paidAmount")),
+  };
+}
+
 /**
  * Where a student's ledger begins when it has no months yet: the later of
  * admission and the current session start (never older arrears by accident).
  */
 async function ledgerStart(schoolId, student, fallback, transaction) {
   const session = await AcademicSessions.findOne({ where: { fkSchoolId: schoolId, isCurrent: true }, transaction });
-  const candidates = [student.admittedOn, session && session.startDate].filter(Boolean).map((d) => firstOfMonth(isoDay(d)));
+  const candidates = [student.admittedOn, session && session.startDate].filter(Boolean).map((d) => monthStamp(isoDay(d)));
   return candidates.length ? candidates.sort().pop() : fallback;
 }
 
@@ -77,7 +95,10 @@ async function createMonth(schoolId, student, month, amountDue, dueDay, transact
     where: { fkStudentId: student.id, month, feeType: "Tuition" },
     defaults: {
       fkSchoolId: schoolId,
-      amountDue,
+      baseAmount: amountDue,
+      discountAmount: 0,
+      netAmount: amountDue,
+      paidAmount: 0,
       status: FEE_MONTH_STATUS.UNPAID,
       dueDate: `${month.slice(0, 7)}-${String(dueDay).padStart(2, "0")}`,
     },
@@ -89,16 +110,17 @@ async function createMonth(schoolId, student, month, amountDue, dueDay, transact
 async function ensureMonthsThrough(schoolId, student, to, transaction) {
   const { dueDay } = await settingsService.get(schoolId, SETTING_KEYS.FEES, { transaction });
   const amountDue = await monthlyFeeFor(schoolId, student, transaction);
+  const target = monthStamp(to);
   const last = await StudentFeeMonths.max("month", { where: { fkStudentId: student.id }, transaction });
-  let month = last ? addMonths(isoDay(last), 1) : await ledgerStart(schoolId, student, to, transaction);
-  for (; month <= to; month = addMonths(month, 1)) {
+  let month = last ? stepMonth(last, 1) : await ledgerStart(schoolId, student, target, transaction);
+  for (; month <= target; month = stepMonth(month, 1)) {
     await createMonth(schoolId, student, month, amountDue, dueDay, transaction);
   }
 }
 
 /** Bulk-create the ledger up to `month` for every active student. */
 async function generateMonths(actor, { month, classId }) {
-  const target = firstOfMonth(month);
+  const target = monthStamp(month);
   const where = { fkSchoolId: actor.schoolId, status: STUDENT_STATUS.ACTIVE };
   if (classId) where.fkClassId = classId;
   const students = await Students.findAll({ where });
@@ -137,7 +159,7 @@ async function listMonths(user, studentId) {
 // ---- recording -------------------------------------------------------------
 
 async function allocate(actor, payment, student, manualLines, transaction) {
-  const currentMonth = firstOfMonth(payment.paidOn);
+  const currentMonth = monthStamp(payment.paidOn);
   await sequelize.query("SELECT pg_advisory_xact_lock(hashtext(:key))", {
     replacements: { key: `fees:${student.id}` },
     transaction,
@@ -146,27 +168,28 @@ async function allocate(actor, payment, student, manualLines, transaction) {
 
   const openMonths = async () =>
     StudentFeeMonths.findAll({
-      where: { fkStudentId: student.id, amountPaid: { [Op.lt]: col("amount_due") } },
+      where: { fkStudentId: student.id, paidAmount: { [Op.lt]: col("net_amount") } },
       order: [["month", "ASC"], ["id", "ASC"]],
       lock: transaction.LOCK.UPDATE,
       transaction,
     });
 
   let months = await openMonths();
+  const paymentAmount = Number(payment.getDataValue("amountPaid"));
   let plan;
   if (manualLines) {
-    plan = validateManualPlan(months.map((m) => m.get({ plain: true })), payment.amount, manualLines);
+    plan = validateManualPlan(months.map(ledgerView), paymentAmount, manualLines);
     if (plan.error) throw new ApiError(400, plan.error);
   } else {
-    plan = planOldestFirst(months.map((m) => m.get({ plain: true })), payment.amount);
+    plan = planOldestFirst(months.map(ledgerView), paymentAmount);
     const { maxAdvanceMonths } = await settingsService.get(actor.schoolId, SETTING_KEYS.FEES, { transaction });
     let horizon = currentMonth;
     // Money beyond everything owed pre-pays upcoming months (status Advance).
     for (let i = 0; plan.leftover > 0 && i < maxAdvanceMonths; i += 1) {
-      horizon = addMonths(horizon, 1);
+      horizon = stepMonth(horizon, 1);
       await ensureMonthsThrough(actor.schoolId, student, horizon, transaction);
       months = await openMonths();
-      plan = planOldestFirst(months.map((m) => m.get({ plain: true })), payment.amount);
+      plan = planOldestFirst(months.map(ledgerView), paymentAmount);
     }
   }
 
@@ -177,9 +200,16 @@ async function allocate(actor, payment, student, manualLines, transaction) {
       { fkSchoolId: actor.schoolId, fkPaymentId: payment.id, fkFeeMonthId: month.id, amount: line.amount },
       { transaction },
     );
-    const amountPaid = fromCents(cents(month.amountPaid) + cents(line.amount));
+    const amountPaid = fromCents(cents(month.getDataValue("paidAmount")) + cents(line.amount));
     await month.update(
-      { amountPaid, status: feeMonthStatus({ amountDue: month.amountDue, amountPaid, month: month.month }, currentMonth) },
+      {
+        paidAmount: amountPaid,
+        status: feeMonthStatus({
+          amountDue: month.getDataValue("netAmount"),
+          amountPaid,
+          month: month.month,
+        }, currentMonth),
+      },
       { transaction },
     );
   }
@@ -223,12 +253,12 @@ async function recordPayment(actor, data) {
         fkSchoolId: actor.schoolId,
         fkStudentId: student.id,
         ref: newReceiptNo(paidOn),
-        type: data.feeType || "Tuition",
         amount: data.amount,
         method: data.method || "Cash",
         status: PAYMENT_STATUS.PAID,
         paidOn,
         notes: data.notes || null,
+        referenceNo: data.referenceNo || null,
         fkRecordedByUserId: actor.id,
         idempotencyKey: data.idempotencyKey || null,
         allocationMode: data.allocations ? ALLOCATION_MODE.MANUAL : ALLOCATION_MODE.AUTO,
@@ -362,14 +392,15 @@ async function collections(actor, { date, recordedBy }) {
 
 /** Super admin school-wide fee position (UR-01: overall totals). */
 async function summary(actor, { month } = {}) {
-  const target = firstOfMonth(month || today());
+  const rangeStart = firstOfMonth(month || today());
+  const target = monthStamp(rangeStart);
   const [collected, ledger, statuses] = await Promise.all([
-    FeePayments.sum("amount", {
-      where: { fkSchoolId: actor.schoolId, status: PAYMENT_STATUS.PAID, paidOn: { [Op.gte]: target, [Op.lt]: addMonths(target, 1) } },
+    FeePayments.sum("amountPaid", {
+      where: { fkSchoolId: actor.schoolId, status: PAYMENT_STATUS.PAID, paidOn: { [Op.gte]: rangeStart, [Op.lt]: addMonths(rangeStart, 1) } },
     }),
     StudentFeeMonths.findOne({
       where: { fkSchoolId: actor.schoolId, month: { [Op.lte]: target } },
-      attributes: [[fn("SUM", col("amount_due")), "due"], [fn("SUM", col("amount_paid")), "paid"]],
+      attributes: [[fn("SUM", col("net_amount")), "due"], [fn("SUM", col("paid_amount")), "paid"]],
       raw: true,
     }),
     StudentFeeMonths.findAll({
@@ -390,18 +421,129 @@ async function summary(actor, { month } = {}) {
 /** Months fully paid up to and including `month` — used by the result gate. */
 async function isPaidThrough(schoolId, studentId, month) {
   const open = await StudentFeeMonths.count({
-    where: { fkSchoolId: schoolId, fkStudentId: studentId, month: { [Op.lte]: firstOfMonth(month) }, amountPaid: { [Op.lt]: col("amount_due") } },
+    where: { fkSchoolId: schoolId, fkStudentId: studentId, month: { [Op.lte]: monthStamp(month) }, paidAmount: { [Op.lt]: col("net_amount") } },
   });
   return open === 0;
 }
 
 async function isMonthPaid(schoolId, studentId, month) {
-  const row = await StudentFeeMonths.findOne({ where: { fkSchoolId: schoolId, fkStudentId: studentId, month: firstOfMonth(month) } });
+  const row = await StudentFeeMonths.findOne({ where: { fkSchoolId: schoolId, fkStudentId: studentId, month: monthStamp(month) } });
   return Boolean(row) && cents(row.amountPaid) >= cents(row.amountDue);
+}
+
+/** Open the ledger through the student's admission month. Used by enrollment. */
+async function openLedger(schoolId, student, transaction) {
+  const start = await ledgerStart(schoolId, student, monthStamp(student.admittedOn || today()), transaction);
+  await ensureMonthsThrough(schoolId, student, start, transaction);
+}
+
+const IMPORT_METHODS = {
+  cash: "Cash",
+  banktransfer: "BankTransfer",
+  "bank transfer": "BankTransfer",
+  cheque: "Cheque",
+  online: "Online",
+};
+
+function importCell(row, names) {
+  const wanted = new Set(names);
+  for (const [key, value] of Object.entries(row)) {
+    if (wanted.has(String(key).trim().toLowerCase())) return value;
+  }
+  return "";
+}
+
+function importDay(value) {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`;
+  }
+  const text = String(value || "").trim();
+  return /^\d{4}-\d{2}-\d{2}/.test(text) ? text.slice(0, 10) : null;
+}
+
+function importMonth(value) {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}`;
+  }
+  const match = String(value || "").trim().match(/^(\d{4})-(\d{2})/);
+  return match ? `${match[1]}-${match[2]}` : null;
+}
+
+/**
+ * Excel fee import (P1-08). Valid rows use the same allocator as a counter
+ * payment. A repeated receipt reference is skipped, not paid again.
+ */
+async function importPayments(actor, { contentBase64 }) {
+  if (!contentBase64) throw new ApiError(400, "contentBase64 is required");
+  let rows;
+  try {
+    const XLSX = require("xlsx");
+    const book = XLSX.read(Buffer.from(contentBase64, "base64"), { type: "buffer", cellDates: true });
+    const sheet = book.Sheets[book.SheetNames[0]];
+    if (!sheet) throw new Error("empty");
+    rows = XLSX.utils.sheet_to_json(sheet, { defval: "" });
+  } catch (err) {
+    if (err instanceof ApiError) throw err;
+    throw new ApiError(400, "The workbook could not be read");
+  }
+
+  const result = { success: 0, skipped: 0, failed: 0, importedAt: new Date().toISOString(), rows: [] };
+  for (let index = 0; index < rows.length; index += 1) {
+    const source = rows[index];
+    const line = index + 2;
+    const admissionNo = String(importCell(source, ["admission number", "admission no"]) || "").trim();
+    const months = String(importCell(source, ["month", "months"]) || "")
+      .split(",")
+      .map((part) => importMonth(part))
+      .filter(Boolean);
+    const amount = Number(importCell(source, ["amount"]));
+    const paidOn = importDay(importCell(source, ["payment date"]));
+    const reference = String(importCell(source, ["receipt/reference", "receipt or reference", "receipt", "reference"]) || "").trim();
+    const methodKey = String(importCell(source, ["payment method", "method"]) || "Cash").trim().toLowerCase();
+    const notes = String(importCell(source, ["notes"]) || "").trim();
+    if (!admissionNo && !months.length && !reference && !Number.isFinite(amount)) continue;
+    try {
+      if (!admissionNo || !months.length || !reference || !paidOn || !(amount > 0)) {
+        throw new ApiError(400, "Admission number, month, amount, payment date, and receipt reference are required");
+      }
+      const method = IMPORT_METHODS[methodKey];
+      if (!method) throw new ApiError(400, "Unknown payment method");
+      const student = await Students.findOne({ where: { fkSchoolId: actor.schoolId, admissionNo } });
+      if (!student) throw new ApiError(400, "Student was not found");
+      if (![STUDENT_STATUS.ACTIVE, STUDENT_STATUS.PENDING].includes(student.status)) {
+        throw new ApiError(400, "Student is not enrolled");
+      }
+      for (const month of months) {
+        const period = await StudentFeeMonths.findOne({ where: { fkSchoolId: actor.schoolId, fkStudentId: student.id, month } });
+        if (!period) throw new ApiError(400, `Month ${month} is not a fee period for this student`);
+      }
+      const recorded = await recordPayment(actor, {
+        studentId: student.id,
+        amount,
+        paidOn,
+        method,
+        notes: notes || null,
+        referenceNo: reference,
+        idempotencyKey: `import:${actor.schoolId}:${reference}`,
+      });
+      if (recorded.duplicate) {
+        result.skipped += 1;
+        result.rows.push({ line, status: "skipped", reason: "Receipt reference was already imported" });
+      } else {
+        result.success += 1;
+        result.rows.push({ line, status: "success", receiptNo: recorded.receipt.receiptNo });
+      }
+    } catch (err) {
+      result.failed += 1;
+      result.rows.push({ line, status: "failed", reason: err.message || "Row failed" });
+    }
+  }
+  return result;
 }
 
 module.exports = {
   generateMonths,
+  openLedger,
   listMonths,
   recordPayment,
   confirmPayment,
@@ -413,4 +555,5 @@ module.exports = {
   isPaidThrough,
   isMonthPaid,
   monthLabel,
+  importPayments,
 };

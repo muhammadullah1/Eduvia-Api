@@ -12,7 +12,6 @@ async function log(schoolId, { actorUserId, actorLabel, action, entityType, enti
       entityType: entityType || null,
       entityId: entityId || null,
       metadata: metadata || null,
-      at: new Date(),
     },
     options,
   );
