@@ -5,10 +5,43 @@ const Joi = require("joi");
 const docSchema = Joi.object({
   id: Joi.number().integer(),
   label: Joi.string().required(),
-  status: Joi.string().valid("Pending", "Uploaded", "Verified"),
+  status: Joi.string().valid("Pending", "Uploaded", "Verified", "Rejected"),
+  fileUrl: Joi.string().uri().allow("", null),
 });
 
 module.exports = {
+  validateList: {
+    query: Joi.object({
+      status: Joi.string().valid("New", "Review", "Waitlist", "Enrolled", "Rejected"),
+      q: Joi.string().max(120).allow(""),
+      submitted: Joi.string().valid("true", "false"),
+      hasInterview: Joi.string().valid("true", "false"),
+      page: Joi.number().integer().min(1).default(1),
+      pageSize: Joi.number().integer().min(1).max(200).default(10),
+    }),
+  },
+  validateCreateDraft: {
+    body: Joi.object({
+      name: Joi.string().allow("", null),
+      fkClassId: Joi.number().integer().allow(null),
+      guardian: Joi.string().allow("", null),
+      phone: Joi.string().allow("", null),
+      email: Joi.string().email().allow("", null),
+      dob: Joi.date().iso().allow(null),
+      gender: Joi.string().valid("Male", "Female", "Other"),
+      address: Joi.string().allow("", null),
+      previousSchool: Joi.string().allow("", null),
+      previousClass: Joi.string().allow("", null),
+      guardianRelation: Joi.string().allow("", null),
+      guardianAddress: Joi.string().allow("", null),
+      interviewType: Joi.string().allow("", null),
+      interviewDate: Joi.date().iso().allow(null),
+      interviewScore: Joi.string().allow("", null),
+      interviewResult: Joi.string().allow("", null),
+      notes: Joi.string().allow("", null),
+      documents: Joi.array().items(docSchema),
+    }),
+  },
   validateCreate: {
     body: Joi.object({
       name: Joi.string().required(),
@@ -27,6 +60,7 @@ module.exports = {
       interviewDate: Joi.date().iso().allow(null),
       interviewScore: Joi.string().allow("", null),
       interviewResult: Joi.string().allow("", null),
+      decision: Joi.string().valid("Admit", "Reject", "Waitlist", "").allow(null),
       notes: Joi.string().allow("", null),
       submittedOn: Joi.date().iso().allow(null),
       documents: Joi.array().items(docSchema),
@@ -50,8 +84,8 @@ module.exports = {
       interviewDate: Joi.date().iso().allow(null),
       interviewScore: Joi.string().allow("", null),
       interviewResult: Joi.string().allow("", null),
+      decision: Joi.string().valid("Admit", "Reject", "Waitlist", "").allow(null),
       notes: Joi.string().allow("", null),
-      status: Joi.string().valid("New", "Review", "Waitlist", "Enrolled", "Rejected"),
       documents: Joi.array().items(docSchema),
     }).min(1),
   },
@@ -59,6 +93,7 @@ module.exports = {
     params: Joi.object({ id: Joi.number().integer().required() }),
     body: Joi.object({
       decision: Joi.string().valid("Admit", "Reject", "Waitlist").required(),
+      remarks: Joi.string().allow("", null),
     }),
   },
   validateEnroll: {

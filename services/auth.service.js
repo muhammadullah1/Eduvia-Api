@@ -7,6 +7,7 @@ const userService = require("./user.service");
 const emailService = require("./email.service");
 const { generateToken, verifyToken } = require("../utils");
 const { USER_STATUS } = require("../constants");
+const { assertPortalRole, getPortalForRole } = require("../constants/portals");
 const ApiError = require("../utils/ApiError");
 
 function getResetSecret(user) {
@@ -38,6 +39,10 @@ async function signIn(email, password) {
     throw new ApiError(400, "Invalid email or password");
   }
 
+  if (!assertPortalRole(user.role)) {
+    throw new ApiError(403, "This account cannot sign in to the school portal.");
+  }
+
   if (user.status !== USER_STATUS.ACTIVE) {
     await userService.update(user.id, {
       lastLogin: new Date(),
@@ -64,7 +69,7 @@ async function signIn(email, password) {
     "1d",
   );
 
-  return { user: userJson, token };
+  return { user: userJson, token, portal: getPortalForRole(user.role) };
 }
 
 
