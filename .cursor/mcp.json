@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "postgres": {
+      "command": "node",
+      "args": [
+        "${userHome}/.cursor/scripts/postgres-mcp.js",
+        "${workspaceFolder}"
+      ]
+    }
+  }
+}
