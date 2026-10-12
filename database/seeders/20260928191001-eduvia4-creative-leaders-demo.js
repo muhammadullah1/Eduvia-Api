@@ -3,13 +3,14 @@
 const bcrypt = require("bcryptjs");
 
 /**
- * Creative Leaders School data for the live schema (migrations 001–036).
+ * Creative Leaders School data for the live schema (migrations 001–040).
  * Password for every account is `password`.
  *
- * Covers the SRS scenarios the current tables can store:
- * Rayan paid through October, Ayaan with three unpaid months, Daniyal partially paid,
- * Zara unpaid for September and linked to the same parent as Rayan, Hassan absent
- * on 8 Oct 2026 with one substitute cover, and an exam result override for Daniyal.
+ * Covers the scenarios the current tables can store: Rayan paid through October,
+ * Ayaan with three unpaid months and a failed September test month, Daniyal partially
+ * paid with a live result override, Zara unpaid for September and linked to the same
+ * parent as Rayan, Hassan covered on 8 Oct 2026, plus leave requests, a revoked
+ * override, admissions in every status, and student lifecycle history.
  */
 
 const SCHOOL_EMAIL = "admin@cls.edu.pk";
@@ -75,6 +76,11 @@ const NAMED_STUDENTS = [
   { key: "ali", no: "CLS-25109", first: "Ali", last: "Raza", gender: "Male", class: "g6r", parent: "family.3@cls.edu.pk", dob: "2015-02-14", admitted: "2026-04-01" },
   { key: "maham", no: "CLS-23107", first: "Maham", last: "Tariq", gender: "Female", class: "g8b", parent: "family.2@cls.edu.pk", dob: "2013-09-21", admitted: "2026-04-01" },
   { key: "usman", no: "CLS-23112", first: "Usman", last: "Javed", gender: "Male", class: "g8b", parent: "family.2@cls.edu.pk", dob: "2013-12-03", admitted: "2026-04-01" },
+  { key: "lina", no: "CLS-23140", first: "Lina", last: "Qureshi", gender: "Female", class: "g8b", parent: "family.2@cls.edu.pk", dob: "2013-04-18", admitted: "2025-04-01", status: "Withdrawn" },
+  { key: "hamza", no: "CLS-22108", first: "Hamza", last: "Raza", gender: "Male", class: "g9", parent: "family.3@cls.edu.pk", dob: "2012-08-30", admitted: "2024-04-01", status: "StruckOff" },
+  { key: "eman", no: "CLS-26101", first: "Eman", last: "Siddiqui", gender: "Female", class: "g6r", parent: "family.1@cls.edu.pk", dob: "2015-10-02", admitted: "2026-10-01", status: "Pending" },
+  { key: "sara", no: "CLS-20114", first: "Sara", last: "Javed", gender: "Female", class: "g10", parent: "family.2@cls.edu.pk", dob: "2010-01-15", admitted: "2019-04-01", status: "Graduated" },
+  { key: "omar.s", no: "CLS-24190", first: "Omar", last: "Siddiqui", gender: "Male", class: "g7b", parent: "family.1@cls.edu.pk", dob: "2014-06-06", admitted: "2026-04-01", status: "Inactive" },
 ];
 
 const pad = (n) => String(n).padStart(2, "0");
@@ -114,16 +120,12 @@ module.exports = {
         withSchool({ name: SESSION.name, start_date: SESSION.start, end_date: SESSION.end, is_current: true }),
       ]);
 
-      await insert("school_settings", [withSchool({
-        admission_number_prefix: "CLS",
-        admission_number_digits: 4,
-        academic_year_start_month: 4,
-        currency: "PKR",
-        tuition_fee_due_day: 10,
-        late_fee_fine_amount: 0,
-        late_fee_grace_days: 5,
-        timezone: "Asia/Karachi",
-      })]);
+      await insert("school_settings", [
+        ["dailyTestRules", { passPercent: 40, maxFailsPerMonth: 1, lowMarksEnabled: true, lowMarksMinPassed: 3, lowMarksBelowPercent: 55 }],
+        ["resultVisibility", { feeRule: "all_due_paid", requireOverrideReason: true }],
+        ["fees", { defaultMonthlyFee: 8500, dueDay: 10, maxAdvanceMonths: 12 }],
+        ["admission", { prefix: "CLS", digits: 4 }],
+      ].map(([key, value]) => withSchool({ key, value: JSON.stringify(value) })));
 
       const subjects = await insert("subjects", SUBJECTS.map((s) => withSchool({ name: s.name, code: s.code, is_active: true })));
       const subjectBy = Object.fromEntries(subjects.map((s) => [s.code, s]));
@@ -208,13 +210,18 @@ module.exports = {
 
       const teacherClass = new Map();
       slotRows.forEach((slot) => teacherClass.set(`${slot.fk_teacher_id}:${slot.fk_class_id}`, slot));
-      await insert("teacher_classes", [...teacherClass.values()].map((slot, index) => ({
-        fk_teacher_id: slot.fk_teacher_id,
-        fk_class_id: slot.fk_class_id,
-        role: index % 7 === 0 ? "ClassTeacher" : "SubjectTeacher",
-        created_at: now,
-        updated_at: now,
-      })));
+      const classHasLead = new Set();
+      await insert("teacher_classes", [...teacherClass.values()].map((slot) => {
+        const lead = !classHasLead.has(slot.fk_class_id);
+        classHasLead.add(slot.fk_class_id);
+        return {
+          fk_teacher_id: slot.fk_teacher_id,
+          fk_class_id: slot.fk_class_id,
+          role: lead ? "ClassTeacher" : "SubjectTeacher",
+          created_at: now,
+          updated_at: now,
+        };
+      }));
 
       const fillers = [];
       CLASSES.forEach((cls, classIndex) => {
@@ -243,6 +250,7 @@ module.exports = {
       const parentUsers = await insert("users", PARENTS.map((p) => withSchool({
         first_name: p.first, last_name: p.last, email: p.email, phone: p.phone, password, gender: p.gender, role: "parent", status: "active",
       })));
+      const parentUserByEmail = Object.fromEntries(PARENTS.map((p, i) => [p.email, parentUsers[i]]));
       const parents = await insert("parents", parentUsers.map((u, i) => withSchool({
         fk_user_id: u.id,
         father_name: PARENTS[i].gender === "Male" ? `${PARENTS[i].first} ${PARENTS[i].last}` : null,
@@ -260,7 +268,7 @@ module.exports = {
         gender: s.gender,
         date_of_birth: s.dob,
         admission_date: s.admitted,
-        status: "Active",
+        status: s.status || "Active",
         discount_percent: 0,
         emergency_contact: PARENTS.find((p) => p.email === s.parent)?.phone || null,
         address: "Lahore",
@@ -281,7 +289,7 @@ module.exports = {
         const start = Number(s.admitted.slice(5, 7));
         const list = [];
         for (let m = start; m <= 9; m += 1) list.push(monthKey(2026, m));
-        if (s.key === "rayan") list.push("2026-10");
+        if (s.key === "rayan" || s.key === "eman") list.push("2026-10");
         return list;
       };
       for (const s of Object.values(studentBy)) {
@@ -343,6 +351,9 @@ module.exports = {
             unallocated_amount: remaining,
             payment_method: "Cash",
             payment_date: date,
+            status: "Paid",
+            allocation_mode: "auto",
+            period: date.slice(0, 7),
             idempotency_key: `seed-${s.id}-${date}-${receiptSeq}`,
             fk_recorded_by_user_id: recorder.id,
             notes: "Counter collection",
@@ -362,7 +373,7 @@ module.exports = {
       for (const entry of ledger.values()) {
         if (!entry.paid) continue;
         const due = Number(entry.net_amount);
-        const status = entry.paid < due ? "Partial" : "Paid";
+        const status = entry.paid < due ? "Partially Paid" : "Paid";
         await qi.bulkUpdate(
           "student_fee_months",
           { paid_amount: entry.paid, status, updated_at: now },
@@ -379,21 +390,40 @@ module.exports = {
       const [absence] = await insert("teacher_absences", [withSchool({
         fk_teacher_id: hassan.id,
         date: "2026-10-08",
+        period_index: coverSlot ? coverSlot.period_index : 1,
+        fk_class_id: coverSlot ? coverSlot.fk_class_id : null,
+        fk_subject_id: coverSlot ? coverSlot.fk_subject_id : subjectBy.MTH.id,
+        fk_timetable_slot_id: coverSlot ? coverSlot.id : null,
         reason: "Medical appointment",
-        status: "Approved",
+        status: coverSlot ? "Covered" : "Pending",
+        fk_marked_by_user_id: ops.id,
         fk_approved_by_user_id: ops.id,
       })]);
-      const coverTeacher = teachers.find((t) => t.id !== hassan.id && !thursdaySlots.some((slot) => slot.period_index === coverSlot.period_index && slot.fk_teacher_id === t.id));
+      const coverTeacher = teachers.find((t) => t.id !== hassan.id && !thursdaySlots.some((slot) => slot.period_index === (coverSlot && coverSlot.period_index) && slot.fk_teacher_id === t.id));
       if (coverSlot && coverTeacher) {
         await insert("substitute_assignments", [withSchool({
           fk_absence_id: absence.id,
           fk_timetable_slot_id: coverSlot.id,
+          fk_class_id: coverSlot.fk_class_id,
+          fk_subject_id: coverSlot.fk_subject_id,
+          fk_original_teacher_id: hassan.id,
           fk_substitute_teacher_id: coverTeacher.id,
+          fk_authorized_by_user_id: ops.id,
+          notes: "Cover arranged by operations",
           date: "2026-10-08",
           period_index: coverSlot.period_index,
           status: "Assigned",
         })]);
       }
+      await insert("teacher_absences", [withSchool({
+        fk_teacher_id: teacherByCode["T-102"].id,
+        date: "2026-10-09",
+        period_index: 1,
+        fk_subject_id: subjectBy.ENG.id,
+        reason: "Not yet covered",
+        status: "Pending",
+        fk_marked_by_user_id: ops.id,
+      })]);
 
       const chapters = await insert("planned_chapters", [
         ["g7b", "MTH", 1, "Integers"],
@@ -419,7 +449,7 @@ module.exports = {
         { classKey: "g7b", code: "MTH", no: 3, date: "2026-10-06", topic: "Adding algebraic expressions", homework: "Exercise 3.1, questions 1–6" },
         { classKey: "g7b", code: "ENG", no: 2, date: "2026-10-06", topic: "Past continuous in a story", homework: "Write ten sentences" },
         { classKey: "g7b", code: "SCI", no: 1, date: "2026-10-07", topic: "Parts of a plant cell", homework: "Label the diagram" },
-      ].map((row) => withSchool({
+      ].map((row, index) => withSchool({
         fk_class_id: classBy[row.classKey].id,
         fk_subject_id: subjectBy[row.code].id,
         fk_teacher_id: teacherByCode[TEACHERS.find((t) => t.subject === row.code).code].id,
@@ -427,7 +457,13 @@ module.exports = {
         date: row.date,
         topic: row.topic,
         homework: row.homework,
+        classwork: "Board work and pair practice",
         notes: "Recorded in class",
+        review_status: index === 0 ? "Approved" : index === 1 ? "Rejected" : "Submitted",
+        fk_submitted_by_user_id: userBy[TEACHERS.find((t) => t.subject === row.code).email].id,
+        fk_reviewed_by_user_id: index === 2 ? null : ops.id,
+        reviewed_at: index === 2 ? null : new Date("2026-10-07T11:00:00+05:00"),
+        review_note: index === 1 ? "Add the worked example before approval." : null,
       })));
 
       const [mathSchedule] = await insert("daily_test_schedules", [withSchool({
@@ -435,12 +471,18 @@ module.exports = {
         day_of_week: "Thursday",
         fk_subject_id: subjectBy.MTH.id,
       })]);
-      const testDates = ["2026-09-03", "2026-09-10", "2026-09-17", "2026-09-24", "2026-10-01", "2026-10-08"];
+      const testDates = ["2026-09-03", "2026-09-10", "2026-09-17", "2026-09-24", "2026-10-01", "2026-10-08", "2026-10-15"];
       const tests = await insert("daily_tests", testDates.map((date, index) => withSchool({
         fk_class_id: classBy.g7b.id,
         fk_subject_id: subjectBy.MTH.id,
         fk_teacher_id: hassan.id,
+        fk_schedule_id: mathSchedule.id,
         date,
+        month: date.slice(0, 7),
+        week_of_month: Math.floor((Number(date.slice(8, 10)) - 1) / 7) + 1,
+        status: index < 4 ? "Published" : index < 6 ? "MarksEntered" : "Scheduled",
+        published_at: index < 4 ? new Date(`${date}T15:00:00+05:00`) : null,
+        fk_published_by_user_id: index < 4 ? userBy["hassan@cls.edu.pk"].id : null,
         total_marks: 20,
         title: `Mathematics weekly test ${index + 1}`,
       })));
@@ -453,6 +495,7 @@ module.exports = {
             fk_student_id: studentBy[key].id,
             obtained_marks: mark,
             is_absent: false,
+            fk_entered_by_user_id: userBy["hassan@cls.edu.pk"].id,
             created_at: now,
             updated_at: now,
           });
@@ -460,12 +503,20 @@ module.exports = {
       }
       await insert("daily_test_results", results);
       await insert("monthly_student_summaries", [
-        { key: "ayaan", percent: 45, fee: "Unpaid", remarks: "Failed two mathematics weekly tests in September." },
-        { key: "rayan", percent: 82, fee: "Paid", remarks: "Consistent weekly scores." },
-        { key: "daniyal", percent: 62, fee: "Partial", remarks: "August fee is only partly paid." },
+        { key: "ayaan", percent: 45, fee: "Unpaid", status: "Failed", passed: 2, failed: 2, flagged: true, remarks: "Failed two mathematics weekly tests in September." },
+        { key: "rayan", percent: 82, fee: "Paid", status: "Passed", passed: 4, failed: 0, flagged: false, remarks: "Consistent weekly scores." },
+        { key: "daniyal", percent: 62, fee: "Partial", status: "Passed", passed: 4, failed: 0, flagged: false, remarks: "August fee is only partly paid." },
       ].map((row) => withSchool({
         fk_student_id: studentBy[row.key].id,
+        fk_class_id: classBy.g7b.id,
+        fk_subject_id: subjectBy.MTH.id,
         month: "2026-09",
+        tests_scheduled: 4,
+        tests_taken: 4,
+        passed_count: row.passed,
+        failed_count: row.failed,
+        status: row.status,
+        flagged_for_follow_up: row.flagged,
         attendance_percentage: 92,
         daily_test_percentage: row.percent,
         fee_status: row.fee,
@@ -474,6 +525,7 @@ module.exports = {
 
       const [exam] = await insert("exams", [withSchool({
         fk_session_id: session.id,
+        fk_class_id: classBy.g7b.id,
         name: "September Monthly Assessment",
         start_date: "2026-09-21",
         end_date: "2026-09-25",
@@ -484,18 +536,23 @@ module.exports = {
       const sheetPlan = [
         { code: "MTH", status: "Published", scores: { rayan: 86, ayaan: 58, hira: 64, daniyal: 71 } },
         { code: "ENG", status: "Published", scores: { rayan: 79, ayaan: 62, hira: 75, daniyal: 68 } },
-        { code: "SCI", status: "Approved", scores: { rayan: 88, ayaan: 55, hira: 70, daniyal: 74 } },
+        { code: "SCI", status: "Verified", scores: { rayan: 88, ayaan: 55, hira: 70, daniyal: 74 } },
       ];
       for (const spec of sheetPlan) {
+        const teacher = TEACHERS.find((t) => t.subject === spec.code);
         const [sheet] = await insert("mark_sheets", [{
+          fk_school_id: schoolId,
           fk_exam_id: exam.id,
+          fk_teacher_id: teacherByCode[teacher.code].id,
           fk_class_id: classBy.g7b.id,
           fk_subject_id: subjectBy[spec.code].id,
           total_marks: 100,
           passing_marks: 40,
           status: spec.status,
-          fk_submitted_by_user_id: userBy[TEACHERS.find((t) => t.subject === spec.code).email].id,
+          fk_submitted_by_user_id: userBy[teacher.email].id,
           fk_approved_by_user_id: spec.status === "Draft" ? null : ops.id,
+          published_at: spec.status === "Published" ? new Date("2026-09-28T10:00:00+05:00") : null,
+          fk_published_by_user_id: spec.status === "Published" ? ops.id : null,
           created_at: now,
           updated_at: now,
         }]);
@@ -514,6 +571,14 @@ module.exports = {
         fk_granted_by_user_id: ops.id,
         reason: "Principal approved release while the August balance is under scholarship review.",
         granted_at: new Date("2026-09-28T09:30:00+05:00"),
+      }), withSchool({
+        fk_exam_id: exam.id,
+        fk_student_id: studentBy.hira.id,
+        fk_granted_by_user_id: ops.id,
+        reason: "Temporary release, later withdrawn.",
+        granted_at: new Date("2026-09-27T09:00:00+05:00"),
+        revoked_at: new Date("2026-09-29T16:00:00+05:00"),
+        fk_revoked_by_user_id: ops.id,
       })]);
 
       const attendance = [];
@@ -521,7 +586,8 @@ module.exports = {
         Object.values(studentBy).forEach((s, index) => {
           let status = "Present";
           if (s.key === "ayaan" && date === "2026-10-07") status = "Absent";
-          else if (index % 17 === 0) status = "Excused";
+          else if (s.key === "hira" && date === "2026-10-08") status = "Leave";
+          else if (index % 17 === 0 && s.status === "Active") status = "Leave";
           attendance.push(withSchool({
             fk_student_id: s.id,
             fk_class_id: classBy[s.class].id,
@@ -534,13 +600,15 @@ module.exports = {
       await insert("attendances", attendance);
 
       const applications = await insert("applications", [
-        { first: "Mustafa", last: "Iqbal", gender: "Male", dob: "2015-04-02", grade: "Grade 6", parent: "Asif Iqbal", phone: "0300-4441122", status: "UnderReview" },
-        { first: "Anaya", last: "Qureshi", gender: "Female", dob: "2014-08-16", grade: "Grade 7", parent: "Sana Qureshi", phone: "0321-7778899", status: "Inquiry" },
-        { first: "Zohaib", last: "Hassan", gender: "Male", dob: "2020-01-11", grade: "KG", parent: "Hassan Raza", phone: "0333-5556677", status: "Enrolled" },
-        { first: "Hamna", last: "Tariq", gender: "Female", dob: "2019-06-20", grade: "Grade 1", parent: "Tariq Mehmood", phone: "0345-8889900", status: "InterviewScheduled" },
-        { first: "Rehan", last: "Shah", gender: "Male", dob: "2011-09-09", grade: "Grade 9", parent: "Shahid Shah", phone: "0312-3334455", status: "Rejected" },
+        { first: "Mustafa", last: "Iqbal", gender: "Male", dob: "2015-04-02", grade: "Grade 6", classKey: "g6r", parent: "Asif Iqbal", phone: "0300-4441122", status: "Review", decision: null, interview: "2026-10-14", score: null, result: null, submitted: "2026-09-20" },
+        { first: "Anaya", last: "Qureshi", gender: "Female", dob: "2014-08-16", grade: "Grade 7", classKey: "g7b", parent: "Sana Qureshi", phone: "0321-7778899", status: "New", decision: null, interview: null, score: null, result: null, submitted: "2026-10-02" },
+        { first: "Zohaib", last: "Hassan", gender: "Male", dob: "2020-01-11", grade: "KG", classKey: "kg", parent: "Hassan Raza", phone: "0333-5556677", status: "Enrolled", decision: "Admit", interview: "2026-09-12", score: "18", result: "Pass", submitted: "2026-09-01" },
+        { first: "Hamna", last: "Tariq", gender: "Female", dob: "2019-06-20", grade: "Grade 1", classKey: null, parent: "Tariq Mehmood", phone: "0345-8889900", status: "Review", decision: null, interview: "2026-10-16", score: null, result: null, submitted: "2026-09-28" },
+        { first: "Rehan", last: "Shah", gender: "Male", dob: "2011-09-09", grade: "Grade 9", classKey: "g9", parent: "Shahid Shah", phone: "0312-3334455", status: "Rejected", decision: "Reject", interview: "2026-09-18", score: "9", result: "Fail", submitted: "2026-09-05" },
+        { first: "Maira", last: "Ali", gender: "Female", dob: "2013-03-03", grade: "Grade 8", classKey: "g8b", parent: "Ali Raza", phone: "0301-2223344", status: "Waitlist", decision: "Waitlist", interview: "2026-09-22", score: "14", result: "Pass", submitted: "2026-09-10" },
       ].map((row) => withSchool({
         fk_session_id: session.id,
+        fk_class_id: row.classKey ? classBy[row.classKey].id : null,
         applicant_first_name: row.first,
         applicant_last_name: row.last,
         gender: row.gender,
@@ -549,14 +617,68 @@ module.exports = {
         parent_name: row.parent,
         parent_phone: row.phone,
         status: row.status,
+        decision: row.decision,
+        address: "Lahore",
+        previous_school: "City Grammar",
+        previous_class: row.grade,
+        guardian_relation: "Father",
+        interview_type: row.interview ? "OnCampus" : null,
+        interview_date: row.interview,
+        interview_score: row.score,
+        interview_result: row.result,
+        submitted_on: row.submitted,
         notes: "Seeded admission file",
       })));
       await insert("application_documents", [
-        { fk_application_id: applications[0].id, title: "Guardian CNIC", file_url: "seed://cnic", document_type: "cnic" },
-        { fk_application_id: applications[0].id, title: "Birth certificate", file_url: "seed://birth", document_type: "birth" },
-        { fk_application_id: applications[1].id, title: "Birth certificate", file_url: "seed://birth", document_type: "birth" },
-        { fk_application_id: applications[2].id, title: "Photograph", file_url: "seed://photo", document_type: "photo" },
+        { fk_application_id: applications[0].id, title: "Guardian CNIC", file_url: "seed://cnic", document_type: "cnic", status: "Verified" },
+        { fk_application_id: applications[0].id, title: "Birth certificate", file_url: null, document_type: "birth", status: "Pending" },
+        { fk_application_id: applications[1].id, title: "Birth certificate", file_url: "seed://birth", document_type: "birth", status: "Uploaded" },
+        { fk_application_id: applications[2].id, title: "Photograph", file_url: "seed://photo", document_type: "photo", status: "Verified" },
+        { fk_application_id: applications[4].id, title: "Previous report card", file_url: "seed://report", document_type: "report", status: "Rejected" },
       ].map((row) => ({ ...row, created_at: now, updated_at: now })));
+
+      await insert("student_leave_requests", [
+        { key: "ayaan", start: "2026-10-09", end: "2026-10-10", reason: "Family travel", status: "Pending", reviewer: null, note: null },
+        { key: "hira", start: "2026-10-08", end: "2026-10-08", reason: "Fever", status: "Approved", reviewer: ops, note: "Marked as leave" },
+        { key: "daniyal", start: "2026-10-06", end: "2026-10-07", reason: "Unspecified", status: "Rejected", reviewer: ops, note: "Needs a medical note" },
+      ].map((row) => withSchool({
+        fk_student_id: studentBy[row.key].id,
+        fk_requested_by_user_id: parentUserByEmail[studentBy[row.key].parent].id,
+        start_date: row.start,
+        end_date: row.end,
+        reason: row.reason,
+        status: row.status,
+        fk_reviewed_by_user_id: row.reviewer ? row.reviewer.id : null,
+        review_notes: row.note,
+      })));
+
+      await insert("student_status_events", [
+        ["lina", "Active", "Withdrawn", "Family relocated", "2026-09-15", null, null, null],
+        ["hamza", "Active", "StruckOff", "Fee default beyond the grace period", "2026-08-20", null, null, "Outstanding"],
+        ["sara", "Active", "Graduated", "Completed Grade 10", "2026-03-31", "Pass", "Completed", "Clear"],
+        ["omar.s", "Active", "Inactive", "Leave of absence for the term", "2026-09-01", null, null, null],
+      ].map(([key, from, to, reason, on, result, academic, financial]) => withSchool({
+        fk_student_id: studentBy[key].id,
+        from_status: from,
+        to_status: to,
+        reason,
+        effective_on: on,
+        fk_actor_user_id: ops.id,
+        fk_class_id: classBy[studentBy[key].class].id,
+        fk_session_id: session.id,
+        final_result: result,
+        academic_status: academic,
+        financial_status: financial,
+      })));
+
+      await insert("student_promotions", [withSchool({
+        fk_student_id: studentBy.usman.id,
+        fk_from_class_id: classBy.g7b.id,
+        fk_to_class_id: classBy.g8b.id,
+        fk_session_id: session.id,
+        promoted_on: "2026-04-01",
+        fk_actor_user_id: ops.id,
+      })]);
 
       await insert("expenses", [
         ["September staff payroll", "Payroll", 640000, "2026-09-25"],
@@ -599,6 +721,9 @@ module.exports = {
     await qi.sequelize.transaction(async (transaction) => {
       const q = (sql) => qi.sequelize.query(sql, { replacements: { id }, transaction });
       await q(`DELETE FROM fee_allocations WHERE fk_payment_id IN (SELECT id FROM fee_payments WHERE fk_school_id = :id)`);
+      await q(`DELETE FROM student_promotions WHERE fk_school_id = :id`);
+      await q(`DELETE FROM student_status_events WHERE fk_school_id = :id`);
+      await q(`DELETE FROM student_leave_requests WHERE fk_school_id = :id`);
       await q(`DELETE FROM mark_sheet_rows WHERE fk_mark_sheet_id IN (SELECT id FROM mark_sheets WHERE fk_exam_id IN (SELECT id FROM exams WHERE fk_school_id = :id))`);
       await q(`DELETE FROM mark_sheets WHERE fk_exam_id IN (SELECT id FROM exams WHERE fk_school_id = :id)`);
       await q(`DELETE FROM daily_test_results WHERE fk_daily_test_id IN (SELECT id FROM daily_tests WHERE fk_school_id = :id)`);
