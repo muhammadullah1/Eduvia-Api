@@ -9,7 +9,7 @@ const v = require("../validations/class");
 const router = express.Router();
 const manage = authorize("academic.manage");
 
-router.get("/", authorize("academic.read"), c.list);
+router.get("/", authorize("academic.read"), validate(v.validateList), c.list);
 router.post("/", manage, validate(v.validateCreate), c.create);
 router.patch("/:id", manage, validate(v.validateId), validate(v.validateUpdate), c.update);
 router.delete("/:id", manage, validate(v.validateId), c.remove);

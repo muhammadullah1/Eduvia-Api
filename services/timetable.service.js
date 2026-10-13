@@ -32,13 +32,27 @@ async function listByClass(user, classId) {
   });
 }
 
+function normalizeSlotTimes(data) {
+  const resolved = { ...data };
+  const rawTime = resolved.time ?? resolved.startTime;
+  if (rawTime) {
+    const trimmed = String(rawTime).trim().slice(0, 5);
+    resolved.startTime = trimmed;
+    resolved.time = trimmed;
+  }
+  if (!resolved.startTime) {
+    throw new ApiError(400, "Start time is required for each period.");
+  }
+  return resolved;
+}
+
 async function resolve(schoolId, data, excludeId) {
   const klass = await Classes.findOne({ where: { id: data.fkClassId, fkSchoolId: schoolId } });
   if (!klass) throw new ApiError(404, "Class not found");
   if (data.periodIndex > klass.periodCount) {
     throw new ApiError(400, `${klass.label} only has ${klass.periodCount} periods.`);
   }
-  const resolved = { ...data };
+  const resolved = normalizeSlotTimes({ ...data });
   if (data.fkTeacherId) {
     const teacher = await Teachers.findOne({
       where: { id: data.fkTeacherId, fkSchoolId: schoolId },
@@ -56,7 +70,7 @@ async function resolve(schoolId, data, excludeId) {
     if (!subject) throw new ApiError(404, "Subject not found");
     resolved.subject = subject.name;
   }
-  if (!resolved.subject) throw new ApiError(400, "A subject is required.");
+  if (!resolved.fkSubjectId) throw new ApiError(400, "A subject is required.");
 
   const idFilter = excludeId ? { id: { [Op.ne]: excludeId } } : {};
   const where = { fkSchoolId: schoolId, day: resolved.day, periodIndex: resolved.periodIndex, ...idFilter };
@@ -69,8 +83,24 @@ async function resolve(schoolId, data, excludeId) {
   return resolved;
 }
 
+function slotPayload(resolved) {
+  return {
+    fkClassId: resolved.fkClassId,
+    day: resolved.day,
+    periodIndex: resolved.periodIndex,
+    startTime: resolved.startTime,
+    fkSubjectId: resolved.fkSubjectId,
+    fkTeacherId: resolved.fkTeacherId ?? null,
+    room: resolved.room ?? null,
+  };
+}
+
 async function create(schoolId, data) {
-  return TimetableSlots.create({ ...(await resolve(schoolId, data)), fkSchoolId: schoolId });
+  const resolved = await resolve(schoolId, data);
+  return TimetableSlots.create({
+    ...slotPayload(resolved),
+    fkSchoolId: schoolId,
+  });
 }
 
 async function update(id, schoolId, data) {
@@ -79,15 +109,16 @@ async function update(id, schoolId, data) {
   const merged = {
     fkClassId: row.fkClassId,
     day: row.day,
-    time: row.time,
+    time: row.startTime,
+    startTime: row.startTime,
     periodIndex: row.periodIndex,
     fkTeacherId: row.fkTeacherId,
     fkSubjectId: row.fkSubjectId,
-    subject: row.subject,
     room: row.room,
     ...data,
   };
-  await row.update(await resolve(schoolId, merged, row.id));
+  const resolved = await resolve(schoolId, merged, row.id);
+  await row.update(slotPayload(resolved));
   return row;
 }
 
@@ -98,4 +129,4 @@ async function remove(id, schoolId) {
   return true;
 }
 
-module.exports = { listByClass, create, update, remove };
+module.exports = { listByClass, create, update, remove, slotPayload };

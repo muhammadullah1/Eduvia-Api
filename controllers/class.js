@@ -5,7 +5,12 @@ const { classService } = require("../services");
 module.exports = {
   list: async (req, res, next) => {
     try {
-      const data = await classService.list(req.user.schoolId, { sessionId: req.query.sessionId });
+      const includeStats =
+        req.query.stats === "true" || req.query.stats === "1";
+      const data = await classService.list(req.user.schoolId, {
+        sessionId: req.query.sessionId,
+        includeStats,
+      });
       res.status(200).json({ success: true, message: "Classes", data });
     } catch (err) {
       next(err);
