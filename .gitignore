@@ -50,8 +50,7 @@ dist
 .dynamodb/
 .tern-port
 
-config/environments/development.json
-config/environments/test.json
+config/environments/
 
 .idea/
 .qodo

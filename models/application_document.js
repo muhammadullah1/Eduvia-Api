@@ -21,8 +21,13 @@ module.exports = (sequelize, DataTypes) => {
       },
       fileUrl: {
         type: DataTypes.STRING(500),
-        allowNull: false,
+        allowNull: true,
         field: "file_url",
+      },
+      status: {
+        type: DataTypes.ENUM("Pending", "Uploaded", "Verified", "Rejected"),
+        allowNull: false,
+        defaultValue: "Pending",
       },
       documentType: {
         type: DataTypes.STRING(100),

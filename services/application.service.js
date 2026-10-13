@@ -27,23 +27,115 @@ const settingsService = require("./settings.service");
 const feeService = require("./fee.service");
 const auditService = require("./audit.service");
 
-const RELATIONS = new Set(["Father", "Mother", "Guardian"]);
+const RELATIONS = new Set(["Father", "Mother", "Guardian", "Other"]);
+const PLACEHOLDER_FILE = "pending://local";
+const DEFAULT_DOCUMENT_LABELS = [
+  "Birth Certificate / B-Form",
+  "Previous School Leaving Certificate",
+  "Guardian ID Copy (CNIC)",
+  "Photographs (2 passport size)",
+  "Medical / Vaccination Record",
+];
 
-async function list(schoolId, { status } = {}) {
+function assertEditable(row) {
+  if (row.status === APPLICATION_STATUS.ENROLLED) {
+    throw new ApiError(400, "Enrolled applications cannot be edited");
+  }
+}
+
+function assertSubmitted(row) {
+  if (!row.submittedOn) {
+    throw new ApiError(400, "Application must be submitted before this action");
+  }
+}
+
+async function list(
+  schoolId,
+  { status, q, page = 1, pageSize = 10, submitted, hasInterview } = {},
+) {
   const where = { fkSchoolId: schoolId };
   if (status) where.status = status;
-  return Applications.findAll({
+
+  if (submitted === "false" || submitted === false) {
+    where.submittedOn = null;
+  } else if (submitted === "true" || submitted === true) {
+    where.submittedOn = { [Op.ne]: null };
+  }
+
+  if (hasInterview === "true" || hasInterview === true) {
+    const interviewClause = {
+      [Op.or]: [
+        { interviewDate: { [Op.ne]: null } },
+        { interviewScore: { [Op.ne]: null } },
+        { interviewResult: { [Op.ne]: null } },
+      ],
+    };
+    if (where[Op.and]) {
+      where[Op.and].push(interviewClause);
+    } else {
+      where[Op.and] = [interviewClause];
+    }
+  }
+
+  const term = q && String(q).trim();
+  if (term) {
+    const searchClause = {
+      [Op.or]: [
+      { applicantFirstName: { [Op.iLike]: `%${term}%` } },
+      { applicantLastName: { [Op.iLike]: `%${term}%` } },
+      { parentName: { [Op.iLike]: `%${term}%` } },
+      { parentPhone: { [Op.iLike]: `%${term}%` } },
+      { gradeApplyingFor: { [Op.iLike]: `%${term}%` } },
+      sequelize.where(
+        sequelize.fn(
+          "concat",
+          sequelize.col("applicant_first_name"),
+          " ",
+          sequelize.col("applicant_last_name"),
+        ),
+        { [Op.iLike]: `%${term}%` },
+      ),
+      ],
+    };
+    if (where[Op.and]) {
+      where[Op.and].push(searchClause);
+    } else {
+      where[Op.and] = [searchClause];
+    }
+  }
+
+  const limit = Math.min(Math.max(Number(pageSize) || 10, 1), 200);
+  const offset = (Math.max(Number(page) || 1, 1) - 1) * limit;
+
+  const { rows, count } = await Applications.findAndCountAll({
     where,
     include: [{ model: ApplicationDocuments, as: "documents" }],
     order: [["created_at", "DESC"], ["id", "DESC"]],
+    limit,
+    offset,
   });
+
+  return { rows, count, page: Number(page) || 1, pageSize: limit };
 }
 
 async function getById(id, schoolId, options = {}) {
+  const { transaction, lock, ...rest } = options;
   const row = await Applications.findOne({
     where: { id, fkSchoolId: schoolId },
-    include: [{ model: ApplicationDocuments, as: "documents" }],
-    ...options,
+    ...(lock ? { transaction, lock } : { include: [{ model: ApplicationDocuments, as: "documents" }], transaction, ...rest }),
+  });
+  if (!row) throw new ApiError(404, "Application not found");
+  if (lock) {
+    return getById(id, schoolId, { transaction });
+  }
+  return row;
+}
+
+async function lockApplication(id, schoolId, transaction) {
+  const row = await Applications.findOne({
+    where: { id, fkSchoolId: schoolId },
+    transaction,
+    lock: transaction.LOCK.UPDATE,
   });
   if (!row) throw new ApiError(404, "Application not found");
   return row;
@@ -60,6 +152,7 @@ async function columnsFrom(schoolId, data, transaction) {
   if (data.phone != null) out.parentPhone = data.phone;
   if (data.email != null) out.parentEmail = String(data.email).trim().toLowerCase();
   if (data.dob != null) out.dateOfBirth = data.dob;
+  if (data.decision !== undefined) out.decision = data.decision || null;
   for (const key of [
     "gender",
     "address",
@@ -78,7 +171,10 @@ async function columnsFrom(schoolId, data, transaction) {
     if (data[key] !== undefined) out[key] = data[key];
   }
   if (data.fkClassId) {
-    const klass = await Classes.findOne({ where: { id: data.fkClassId, fkSchoolId: schoolId }, transaction });
+    const klass = await Classes.findOne({
+      where: { id: data.fkClassId, fkSchoolId: schoolId },
+      transaction,
+    });
     if (!klass) throw new ApiError(404, "Class not found");
     out.gradeApplyingFor = klass.label;
     out.fkClassId = klass.id;
@@ -87,9 +183,125 @@ async function columnsFrom(schoolId, data, transaction) {
 }
 
 async function currentSessionId(schoolId, transaction) {
-  const session = await AcademicSessions.findOne({ where: { fkSchoolId: schoolId, isCurrent: true }, transaction });
+  const session = await AcademicSessions.findOne({
+    where: { fkSchoolId: schoolId, isCurrent: true },
+    transaction,
+  });
   if (!session) throw new ApiError(400, "No current academic session");
   return session.id;
+}
+
+async function syncDocuments(applicationId, documents, transaction) {
+  if (!Array.isArray(documents)) return;
+  for (const doc of documents) {
+    const label = doc.label || doc.title;
+    if (!label) continue;
+    const status = doc.status || "Pending";
+    const fileUrl =
+      status === "Pending" ? null : doc.fileUrl || PLACEHOLDER_FILE;
+    if (doc.id) {
+      await ApplicationDocuments.update(
+        { title: label, status, ...(fileUrl ? { fileUrl } : {}) },
+        { where: { id: doc.id, fkApplicationId: applicationId }, transaction },
+      );
+    } else {
+      await ApplicationDocuments.create(
+        {
+          fkApplicationId: applicationId,
+          title: label,
+          status,
+          fileUrl,
+          documentType: doc.documentType || "admission",
+        },
+        { transaction },
+      );
+    }
+  }
+}
+
+async function ensureDefaultDocuments(applicationId, transaction) {
+  const existing = await ApplicationDocuments.count({
+    where: { fkApplicationId: applicationId },
+    transaction,
+  });
+  if (existing > 0) return;
+  await ApplicationDocuments.bulkCreate(
+    DEFAULT_DOCUMENT_LABELS.map((label) => ({
+      fkApplicationId: applicationId,
+      title: label,
+      status: "Pending",
+      fileUrl: null,
+      documentType: "admission",
+    })),
+    { transaction },
+  );
+}
+
+function validateForSubmit(row) {
+  const missing = [];
+  if (!row.applicantFirstName || row.applicantFirstName === "Draft") {
+    missing.push("applicant name");
+  }
+  if (!row.dateOfBirth) missing.push("date of birth");
+  if (!row.gender) missing.push("gender");
+  if (!row.fkClassId) missing.push("class applied for");
+  if (!row.parentName || row.parentName === "Pending") missing.push("guardian");
+  if (!row.parentPhone || row.parentPhone === "0000000000") {
+    missing.push("guardian phone");
+  }
+  if (!row.address) missing.push("address");
+  if (missing.length) {
+    throw new ApiError(400, `Cannot submit: missing ${missing.join(", ")}`);
+  }
+}
+
+async function createDraft(schoolId, data = {}) {
+  return sequelize.transaction(async (t) => {
+    const columns = await columnsFrom(schoolId, data, t);
+    let grade = "Unassigned";
+    let fkClassId = null;
+    if (columns.fkClassId) {
+      fkClassId = columns.fkClassId;
+      grade = columns.gradeApplyingFor || grade;
+    }
+    const nameParts = data.name
+      ? String(data.name).trim().split(/\s+/)
+      : ["Draft", "Application"];
+    const app = await Applications.create(
+      {
+        applicantFirstName: nameParts[0] || "Draft",
+        applicantLastName: nameParts.slice(1).join(" ") || "Application",
+        gender: columns.gender || "Other",
+        dateOfBirth: columns.dateOfBirth || "2010-01-01",
+        gradeApplyingFor: grade,
+        fkClassId,
+        parentName: columns.parentName || "Pending",
+        parentPhone: columns.parentPhone || "0000000000",
+        parentEmail: columns.parentEmail || null,
+        address: columns.address || null,
+        previousSchool: columns.previousSchool || null,
+        previousClass: columns.previousClass || null,
+        guardianRelation: columns.guardianRelation || null,
+        guardianAddress: columns.guardianAddress || null,
+        interviewType: columns.interviewType || null,
+        interviewDate: columns.interviewDate || null,
+        interviewScore: columns.interviewScore || null,
+        interviewResult: columns.interviewResult || null,
+        notes: columns.notes || null,
+        fkSchoolId: schoolId,
+        fkSessionId: await currentSessionId(schoolId, t),
+        status: APPLICATION_STATUS.NEW,
+        submittedOn: null,
+      },
+      { transaction: t },
+    );
+    if (data.documents?.length) {
+      await syncDocuments(app.id, data.documents, t);
+    } else {
+      await ensureDefaultDocuments(app.id, t);
+    }
+    return getById(app.id, schoolId, { transaction: t });
+  });
 }
 
 async function create(schoolId, data) {
@@ -110,55 +322,84 @@ async function create(schoolId, data) {
       { transaction: t },
     );
     if (documents.length) {
-      await ApplicationDocuments.bulkCreate(
-        documents.map((d) => ({
-          fkApplicationId: app.id,
-          label: d.label,
-          status: d.status || "Pending",
-        })),
-        { transaction: t },
-      );
+      await syncDocuments(app.id, documents, t);
+    } else {
+      await ensureDefaultDocuments(app.id, t);
     }
     return getById(app.id, schoolId, { transaction: t });
   });
 }
 
 async function update(id, schoolId, data) {
-  const row = await getById(id, schoolId);
-  const { documents } = data;
-  await row.update(await columnsFrom(schoolId, data));
-  if (Array.isArray(documents)) {
-    for (const doc of documents) {
-      if (doc.id) {
-        await ApplicationDocuments.update(
-          { label: doc.label, status: doc.status },
-          { where: { id: doc.id, fkApplicationId: id } },
-        );
-      } else if (doc.label) {
-        await ApplicationDocuments.create({
-          fkApplicationId: id,
-          label: doc.label,
-          status: doc.status || "Pending",
-        });
-      }
-    }
+  if (data.status !== undefined) {
+    throw new ApiError(400, "Use dedicated endpoints to change application status");
   }
-  return getById(id, schoolId);
+  return sequelize.transaction(async (t) => {
+    const row = await lockApplication(id, schoolId, t);
+    assertEditable(row);
+    const { documents, ...rest } = data;
+    const columns = await columnsFrom(schoolId, rest, t);
+    await row.update(columns, { transaction: t });
+    if (documents !== undefined) {
+      await syncDocuments(id, documents, t);
+    }
+    return getById(id, schoolId, { transaction: t });
+  });
 }
 
-async function decide(id, schoolId, decision) {
+async function submit(id, schoolId) {
+  return sequelize.transaction(async (t) => {
+    const row = await lockApplication(id, schoolId, t);
+    assertEditable(row);
+    if (row.submittedOn) {
+      return getById(id, schoolId, { transaction: t });
+    }
+    validateForSubmit(row);
+    await row.update(
+      { submittedOn: new Date().toISOString().slice(0, 10) },
+      { transaction: t },
+    );
+    return getById(id, schoolId, { transaction: t });
+  });
+}
+
+async function markUnderReview(id, schoolId) {
+  return sequelize.transaction(async (t) => {
+    const row = await lockApplication(id, schoolId, t);
+    assertSubmitted(row);
+    if (row.status !== APPLICATION_STATUS.NEW) {
+      throw new ApiError(400, "Only new applications can be marked under review");
+    }
+    await row.update({ status: APPLICATION_STATUS.REVIEW }, { transaction: t });
+    return getById(id, schoolId, { transaction: t });
+  });
+}
+
+async function decide(id, schoolId, decision, remarks) {
   if (!Object.values(APPLICATION_DECISION).includes(decision)) {
     throw new ApiError(400, "Invalid decision");
   }
-  const row = await getById(id, schoolId);
-  if (row.status === APPLICATION_STATUS.ENROLLED) {
-    throw new ApiError(400, "An enrolled application cannot be decided again");
-  }
-  let status = APPLICATION_STATUS.REVIEW;
-  if (decision === APPLICATION_DECISION.REJECT) status = APPLICATION_STATUS.REJECTED;
-  if (decision === APPLICATION_DECISION.WAITLIST) status = APPLICATION_STATUS.WAITLIST;
-  await row.update({ decision, status });
-  return getById(id, schoolId);
+  return sequelize.transaction(async (t) => {
+    const row = await lockApplication(id, schoolId, t);
+    assertSubmitted(row);
+    if (row.status === APPLICATION_STATUS.ENROLLED) {
+      throw new ApiError(400, "An enrolled application cannot be decided again");
+    }
+    let status = APPLICATION_STATUS.REVIEW;
+    if (decision === APPLICATION_DECISION.REJECT) {
+      status = APPLICATION_STATUS.REJECTED;
+    }
+    if (decision === APPLICATION_DECISION.WAITLIST) {
+      status = APPLICATION_STATUS.WAITLIST;
+    }
+    const patch = { decision, status };
+    if (remarks) {
+      const existing = row.notes ? String(row.notes).trim() : "";
+      patch.notes = existing ? `${existing}\n${remarks}` : remarks;
+    }
+    await row.update(patch, { transaction: t });
+    return getById(id, schoolId, { transaction: t });
+  });
 }
 
 async function nextAdmissionNo(schoolId, transaction) {
@@ -242,16 +483,23 @@ async function enroll(id, schoolId, { admissionNo } = {}, actor) {
     throw new ApiError(400, "Application must have Admit decision before enroll");
   }
   if (!app.fkClassId) throw new ApiError(400, "Application has no class");
+  assertSubmitted(app);
 
   const createdParent = await sequelize.transaction(async (t) => {
-    const klass = await Classes.findOne({ where: { id: app.fkClassId, fkSchoolId: schoolId }, transaction: t, lock: t.LOCK.UPDATE });
+    const klass = await Classes.findOne({
+      where: { id: app.fkClassId, fkSchoolId: schoolId },
+      transaction: t,
+      lock: t.LOCK.UPDATE,
+    });
     if (!klass) throw new ApiError(404, "Class not found");
     if (klass.capacity != null) {
       const seated = await Students.count({
         where: { fkClassId: klass.id, fkSchoolId: schoolId, status: STUDENT_STATUS.ACTIVE },
         transaction: t,
       });
-      if (seated >= Number(klass.capacity)) throw new ApiError(409, "Class is at capacity");
+      if (seated >= Number(klass.capacity)) {
+        throw new ApiError(409, "Class is at capacity");
+      }
     }
 
     const nameParts = String(app.name).trim().split(/\s+/);
@@ -271,12 +519,19 @@ async function enroll(id, schoolId, { admissionNo } = {}, actor) {
     );
     const parentUser = await linkGuardian(schoolId, app, student, t);
     await feeService.openLedger(schoolId, student, t);
-    await app.update({ status: APPLICATION_STATUS.ENROLLED, enrolledStudentId: student.id }, { transaction: t });
+    await app.update(
+      { status: APPLICATION_STATUS.ENROLLED, enrolledStudentId: student.id },
+      { transaction: t },
+    );
     if (actor) {
       await auditService.record(
         actor,
         `enrolled ${student.firstName} ${student.lastName} (${student.admissionNo})`,
-        { entityType: "student", entityId: student.id, metadata: { applicationId: app.id, classId: klass.id } },
+        {
+          entityType: "student",
+          entityId: student.id,
+          metadata: { applicationId: app.id, classId: klass.id },
+        },
         { transaction: t },
       );
     }
@@ -292,7 +547,20 @@ async function enroll(id, schoolId, { admissionNo } = {}, actor) {
     }
   }
 
-  return { application: await getById(id, schoolId), student: await Students.findByPk((await getById(id, schoolId)).enrolledStudentId) };
+  return {
+    application: await getById(id, schoolId),
+    student: await Students.findByPk((await getById(id, schoolId)).enrolledStudentId),
+  };
 }
 
-module.exports = { list, getById, create, update, decide, enroll };
+module.exports = {
+  list,
+  getById,
+  createDraft,
+  create,
+  update,
+  submit,
+  markUnderReview,
+  decide,
+  enroll,
+};

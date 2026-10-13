@@ -18,8 +18,8 @@ School management API for Creative Leaders School (Eduvia). Phase 1 covers acade
 
 ```bash
 npm install
-cp config/environments/development.json.example config/environments/development.json
-# Edit development.json: set db credentials, port, frontEndUrl, signInJwtSecret
+# Create config/environments/development.json (this folder is not in git)
+# Set db credentials, port, frontEndUrl, signInJwtSecret
 npm run db:migrate
 npm run dev
 ```
