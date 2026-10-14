@@ -22,7 +22,7 @@ module.exports = (sequelize, DataTypes) => {
       },
       fkTeacherId: {
         type: DataTypes.INTEGER,
-        allowNull: false,
+        allowNull: true,
         field: "fk_teacher_id",
       },
       fkSubjectId: {

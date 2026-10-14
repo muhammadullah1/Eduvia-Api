@@ -42,6 +42,11 @@ module.exports = (sequelize, DataTypes) => {
         defaultValue: 8,
         field: "period_count",
       },
+      periodStartTimes: {
+        type: DataTypes.JSONB,
+        allowNull: true,
+        field: "period_start_times",
+      },
       monthlyTuitionFee: {
         type: DataTypes.DECIMAL(10, 2),
         allowNull: false,
