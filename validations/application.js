@@ -1,12 +1,37 @@
 "use strict";
 
 const Joi = require("joi");
+const { isValidPhonePk } = require("../utils/pakistan");
+
+const phoneSchema = Joi.string().custom((value, helpers) => {
+  if (!value || !String(value).trim()) return value;
+  if (!isValidPhonePk(value)) {
+    return helpers.error("any.invalid");
+  }
+  return value;
+}, "Pakistani mobile");
 
 const docSchema = Joi.object({
-  id: Joi.number().integer(),
+  id: Joi.alternatives().try(Joi.number().integer(), Joi.string()),
   label: Joi.string().required(),
   status: Joi.string().valid("Pending", "Uploaded", "Verified", "Rejected"),
-  fileUrl: Joi.string().uri().allow("", null),
+  fileUrl: Joi.string()
+    .pattern(/^(https?:\/\/|pending:\/\/)/)
+    .allow("", null),
+});
+
+const interviewDateSchema = Joi.date().iso().allow(null).custom((value, helpers) => {
+  if (!value) return value;
+  const d = new Date(value);
+  const iso = d.toISOString().slice(0, 10);
+  const min = new Date().toISOString().slice(0, 10);
+  const maxDate = new Date();
+  maxDate.setMonth(maxDate.getMonth() + 18);
+  const max = maxDate.toISOString().slice(0, 10);
+  if (iso < min || iso > max) {
+    return helpers.message(`Interview date must be between ${min} and ${max}`);
+  }
+  return value;
 });
 
 module.exports = {
@@ -25,7 +50,9 @@ module.exports = {
       name: Joi.string().allow("", null),
       fkClassId: Joi.number().integer().allow(null),
       guardian: Joi.string().allow("", null),
-      phone: Joi.string().allow("", null),
+      phone: phoneSchema.allow("", null).messages({
+        "any.invalid": "Enter a valid Pakistani mobile number",
+      }),
       email: Joi.string().email().allow("", null),
       dob: Joi.date().iso().allow(null),
       gender: Joi.string().valid("Male", "Female", "Other"),
@@ -35,7 +62,7 @@ module.exports = {
       guardianRelation: Joi.string().allow("", null),
       guardianAddress: Joi.string().allow("", null),
       interviewType: Joi.string().allow("", null),
-      interviewDate: Joi.date().iso().allow(null),
+      interviewDate: interviewDateSchema,
       interviewScore: Joi.string().allow("", null),
       interviewResult: Joi.string().allow("", null),
       notes: Joi.string().allow("", null),
@@ -47,7 +74,9 @@ module.exports = {
       name: Joi.string().required(),
       fkClassId: Joi.number().integer().required(),
       guardian: Joi.string().required(),
-      phone: Joi.string().required(),
+      phone: phoneSchema.required().messages({
+        "any.invalid": "Enter a valid Pakistani mobile number",
+      }),
       email: Joi.string().email().allow("", null),
       dob: Joi.date().iso().required(),
       gender: Joi.string().valid("Male", "Female", "Other").required(),
@@ -57,7 +86,7 @@ module.exports = {
       guardianRelation: Joi.string().allow("", null),
       guardianAddress: Joi.string().allow("", null),
       interviewType: Joi.string().allow("", null),
-      interviewDate: Joi.date().iso().allow(null),
+      interviewDate: interviewDateSchema,
       interviewScore: Joi.string().allow("", null),
       interviewResult: Joi.string().allow("", null),
       decision: Joi.string().valid("Admit", "Reject", "Waitlist", "").allow(null),
@@ -71,7 +100,9 @@ module.exports = {
       name: Joi.string(),
       fkClassId: Joi.number().integer().allow(null),
       guardian: Joi.string(),
-      phone: Joi.string(),
+      phone: phoneSchema.messages({
+        "any.invalid": "Enter a valid Pakistani mobile number",
+      }),
       dob: Joi.date().iso().allow(null),
       email: Joi.string().email().allow("", null),
       gender: Joi.string().valid("Male", "Female", "Other"),
@@ -81,7 +112,7 @@ module.exports = {
       guardianRelation: Joi.string().allow("", null),
       guardianAddress: Joi.string().allow("", null),
       interviewType: Joi.string().allow("", null),
-      interviewDate: Joi.date().iso().allow(null),
+      interviewDate: interviewDateSchema,
       interviewScore: Joi.string().allow("", null),
       interviewResult: Joi.string().allow("", null),
       decision: Joi.string().valid("Admit", "Reject", "Waitlist", "").allow(null),
@@ -104,5 +135,25 @@ module.exports = {
   },
   validateId: {
     params: Joi.object({ id: Joi.number().integer().required() }),
+  },
+  validateDocumentId: {
+    params: Joi.object({
+      id: Joi.number().integer().required(),
+      documentId: Joi.number().integer().required(),
+    }),
+  },
+  validatePresignDocument: {
+    body: Joi.object({
+      documentId: Joi.number().integer().required(),
+      contentType: Joi.string()
+        .valid(
+          "application/pdf",
+          "image/jpeg",
+          "image/png",
+          "image/webp",
+        )
+        .required(),
+      fileName: Joi.string().max(200).required(),
+    }),
   },
 };
