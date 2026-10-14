@@ -2,8 +2,10 @@
 
 const Joi = require("joi");
 const { USER_ROLES } = require("../constants");
+const { idParam } = require("./common");
 
 module.exports = {
+  validateId: idParam,
   validateCreate: {
     body: Joi.object({
       firstName: Joi.string().required(),

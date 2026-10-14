@@ -25,4 +25,16 @@ module.exports = {
       next(err);
     }
   },
+  resendInvitation: async (req, res, next) => {
+    try {
+      const data = await userService.resendInvitation(req.user, Number(req.params.id));
+      res.status(200).json({
+        success: true,
+        message: "Activation email sent",
+        data,
+      });
+    } catch (err) {
+      next(err);
+    }
+  },
 };

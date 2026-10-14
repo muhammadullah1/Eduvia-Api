@@ -134,6 +134,21 @@ async function createStaffUser(actor, payload) {
   return json;
 }
 
+async function resendInvitation(actor, userId) {
+  const user = await Users.findOne({
+    where: { id: userId, fkSchoolId: actor.schoolId },
+  });
+  if (!user) throw new ApiError(404, "User not found");
+  if (!STAFF_ROLES.includes(user.role)) {
+    throw new ApiError(400, "Invitations can only be resent for staff accounts.");
+  }
+  if (actor.role !== USER_ROLES.SUPER_ADMIN && user.role !== USER_ROLES.TEACHER) {
+    throw new ApiError(403, "Only the super admin can resend invitations for non-teachers.");
+  }
+  await authService.sendUserInvitation(user, user.role);
+  return { sent: true, email: user.email };
+}
+
 module.exports = {
   create,
   findById,
@@ -143,4 +158,5 @@ module.exports = {
   update,
   listBySchool,
   createStaffUser,
+  resendInvitation,
 };

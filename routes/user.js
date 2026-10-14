@@ -10,5 +10,11 @@ const router = express.Router();
 
 router.get("/", authorize("users.read"), c.list);
 router.post("/", authorize("users.create"), validate(v.validateCreate), c.create);
+router.post(
+  "/:id/resend-invitation",
+  authorize("users.create"),
+  validate(v.validateId),
+  c.resendInvitation
+);
 
 module.exports = router;
