@@ -16,5 +16,12 @@ router.post(
   validate(v.validateId),
   c.resendInvitation
 );
+router.patch(
+  "/:id",
+  authorize("users.create"),
+  validate(v.validateUpdate),
+  c.update
+);
+router.delete("/:id", authorize("users.create"), validate(v.validateId), c.remove);
 
 module.exports = router;

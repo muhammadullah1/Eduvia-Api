@@ -37,4 +37,20 @@ module.exports = {
       next(err);
     }
   },
+  update: async (req, res, next) => {
+    try {
+      const user = await userService.updateStaffUser(req.user, Number(req.params.id), req.body);
+      res.status(200).json({ success: true, message: "User updated", data: user });
+    } catch (err) {
+      next(err);
+    }
+  },
+  remove: async (req, res, next) => {
+    try {
+      const data = await userService.removeStaffUser(req.user, Number(req.params.id));
+      res.status(200).json({ success: true, message: "User removed", data });
+    } catch (err) {
+      next(err);
+    }
+  },
 };

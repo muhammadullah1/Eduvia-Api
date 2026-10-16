@@ -4,6 +4,32 @@ const { Op } = require("sequelize");
 const { Classes, Students, TimetableSlots } = require("../models");
 const ApiError = require("../utils/ApiError");
 
+function isArchivedClass(row) {
+  if (!row) return false;
+  const archivedAt =
+    row.deletedAt ??
+    (typeof row.get === "function" ? row.get("archived_at") : null) ??
+    row.archived_at;
+  return Boolean(archivedAt);
+}
+
+async function assertNoActiveDuplicate(schoolId, sessionId, grade, section, excludeId) {
+  const where = {
+    fkSchoolId: schoolId,
+    fkSessionId: sessionId,
+    grade,
+    section,
+  };
+  if (excludeId) where.id = { [Op.ne]: excludeId };
+  const active = await Classes.findOne({ where });
+  if (active) {
+    throw new ApiError(
+      409,
+      "A class with this name already exists in the current session.",
+    );
+  }
+}
+
 async function attachStats(rows) {
   if (!rows.length) return rows;
   const ids = rows.map((row) => row.id);
@@ -28,7 +54,7 @@ async function attachStats(rows) {
       [
         sequelize.fn(
           "COUNT",
-          sequelize.fn("DISTINCT", sequelize.col("fk_subject_id"))
+          sequelize.fn("DISTINCT", sequelize.col("fk_subject_id")),
         ),
         "count",
       ],
@@ -39,10 +65,10 @@ async function attachStats(rows) {
   });
 
   const studentsByClass = new Map(
-    studentRows.map((row) => [row.fkClassId, Number(row.count) || 0])
+    studentRows.map((row) => [row.fkClassId, Number(row.count) || 0]),
   );
   const subjectsByClass = new Map(
-    subjectRows.map((row) => [row.fkClassId, Number(row.count) || 0])
+    subjectRows.map((row) => [row.fkClassId, Number(row.count) || 0]),
   );
 
   return rows.map((row) => {
@@ -53,9 +79,21 @@ async function attachStats(rows) {
   });
 }
 
-async function list(schoolId, { sessionId, includeStats } = {}) {
+async function list(schoolId, { sessionId, includeStats, archived } = {}) {
   const where = { fkSchoolId: schoolId };
   if (sessionId) where.fkSessionId = sessionId;
+
+  if (archived) {
+    where.archived_at = { [Op.ne]: null };
+    const rows = await Classes.findAll({
+      where,
+      paranoid: false,
+      order: [["grade", "ASC"], ["section", "ASC"]],
+    });
+    if (!includeStats) return rows;
+    return attachStats(rows);
+  }
+
   const rows = await Classes.findAll({
     where,
     order: [["grade", "ASC"], ["section", "ASC"]],
@@ -71,19 +109,59 @@ async function getById(id, schoolId) {
 }
 
 async function create(schoolId, data) {
-  return Classes.create({ ...data, fkSchoolId: schoolId });
+  const { fkSessionId, grade, section } = data;
+  await assertNoActiveDuplicate(schoolId, fkSessionId, grade, section);
+  return Classes.create({ ...data, fkSchoolId: schoolId, status: "Active" });
 }
 
 async function update(id, schoolId, data) {
   const row = await getById(id, schoolId);
+  const grade = data.grade ?? row.grade;
+  const section = data.section ?? row.section;
+  const sessionId = data.fkSessionId ?? row.fkSessionId;
+
+  if (data.grade !== undefined || data.section !== undefined || data.fkSessionId !== undefined) {
+    await assertNoActiveDuplicate(schoolId, sessionId, grade, section, id);
+  }
+
   await row.update(data);
   return row;
 }
 
 async function remove(id, schoolId) {
   const row = await getById(id, schoolId);
+  await row.update({ status: "Archived" });
   await row.destroy();
   return true;
 }
 
-module.exports = { list, getById, create, update, remove };
+async function restore(id, schoolId) {
+  const row = await Classes.findOne({
+    where: { id, fkSchoolId: schoolId },
+    paranoid: false,
+  });
+  if (!row) throw new ApiError(404, "Class not found");
+  if (!isArchivedClass(row)) {
+    throw new ApiError(400, "This class is already active.");
+  }
+
+  await assertNoActiveDuplicate(
+    schoolId,
+    row.fkSessionId,
+    row.grade,
+    row.section,
+  );
+
+  await row.restore();
+  await row.update({ status: "Active" });
+  return row;
+}
+
+module.exports = {
+  list,
+  getById,
+  create,
+  update,
+  remove,
+  restore,
+};

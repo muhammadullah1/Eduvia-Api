@@ -46,6 +46,13 @@ const absenceInclude = [
 
 const teacherName = (t) => (t && t.user ? `${t.user.firstName} ${t.user.lastName}` : `Teacher #${t && t.id}`);
 
+async function activeSubstitutionFor(absenceId, transaction) {
+  return SubstituteAssignments.findOne({
+    where: { fkAbsenceId: absenceId },
+    transaction,
+  });
+}
+
 async function list(schoolId, { date, teacherId, status } = {}, user) {
   const where = { fkSchoolId: schoolId };
   if (date) where.date = date;
@@ -132,7 +139,10 @@ async function availableSubstitutes(schoolId, absenceId) {
   const absence = await getById(absenceId, schoolId);
   if (!absence.fkClassId) return { absence, teachers: [] };
   const busy = await busyAt(schoolId, absence.date, absence.periodIndex);
-  const current = absence.substitution ? absence.substitution.fkSubstituteTeacherId : null;
+  const subs = absence.substitutions || [];
+  const current =
+    subs[0]?.fkSubstituteTeacherId ??
+    (absence.substitution ? absence.substitution.fkSubstituteTeacherId : null);
   const teachers = await Teachers.findAll({
     where: { fkSchoolId: schoolId, id: { [Op.ne]: absence.fkTeacherId } },
     include: [
@@ -229,13 +239,19 @@ async function assignSubstitute(actor, absenceId, { substituteTeacherId, notes }
 
 async function removeSubstitute(actor, absenceId) {
   await sequelize.transaction(async (transaction) => {
-    const absence = await getById(absenceId, actor.schoolId, { transaction });
-    if (!absence.substitution) throw new ApiError(400, "No substitute assigned.");
-    await absence.substitution.destroy({ transaction });
+    const absence = await TeacherAbsences.findOne({
+      where: { id: absenceId, fkSchoolId: actor.schoolId },
+      transaction,
+      lock: transaction.LOCK.UPDATE,
+    });
+    if (!absence) throw new ApiError(404, "Absence not found");
+    const cover = await activeSubstitutionFor(absenceId, transaction);
+    if (!cover) throw new ApiError(400, "No substitute assigned.");
+    await cover.destroy({ transaction });
     await absence.update({ status: ABSENCE_STATUS.PENDING }, { transaction });
     await auditService.record(actor, `removed substitute from absence #${absence.id}`, {
       entityType: "substitute_assignment",
-      entityId: absence.substitution.id,
+      entityId: cover.id,
     }, { transaction });
   });
   return getById(absenceId, actor.schoolId);
@@ -243,8 +259,14 @@ async function removeSubstitute(actor, absenceId) {
 
 async function cancel(actor, absenceId) {
   await sequelize.transaction(async (transaction) => {
-    const absence = await getById(absenceId, actor.schoolId, { transaction });
-    if (absence.substitution) await absence.substitution.destroy({ transaction });
+    const absence = await TeacherAbsences.findOne({
+      where: { id: absenceId, fkSchoolId: actor.schoolId },
+      transaction,
+      lock: transaction.LOCK.UPDATE,
+    });
+    if (!absence) throw new ApiError(404, "Absence not found");
+    const cover = await activeSubstitutionFor(absenceId, transaction);
+    if (cover) await cover.destroy({ transaction });
     await absence.update({ status: ABSENCE_STATUS.CANCELLED }, { transaction });
     await auditService.record(actor, `cancelled absence #${absence.id}`, { entityType: "teacher_absence", entityId: absence.id }, { transaction });
   });

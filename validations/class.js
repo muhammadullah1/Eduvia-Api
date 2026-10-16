@@ -21,6 +21,7 @@ module.exports = {
     query: Joi.object({
       sessionId: Joi.number().integer(),
       stats: Joi.string().valid("true", "false", "1", "0"),
+      archived: Joi.string().valid("true", "false", "1", "0"),
     }),
   },
   validateUpdate: {

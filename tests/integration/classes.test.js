@@ -108,4 +108,123 @@ describe("class service", () => {
       classService.getById(created.id, fx.school.id),
     ).rejects.toMatchObject({ statusCode: 404 });
   });
+
+  test("active duplicate grade+section is rejected", async () => {
+    const fx = await buildFixture();
+    await classService.create(fx.school.id, {
+      fkSessionId: fx.session.id,
+      grade: "Grade",
+      section: "Main",
+      label: "Grade",
+      room: "R1",
+      periodCount: 8,
+      monthlyFee: 1000,
+    });
+    await expect(
+      classService.create(fx.school.id, {
+        fkSessionId: fx.session.id,
+        grade: "Grade",
+        section: "Main",
+        label: "Grade renamed",
+        room: "R2",
+        periodCount: 8,
+        monthlyFee: 1000,
+      }),
+    ).rejects.toMatchObject({
+      statusCode: 409,
+      message: "A class with this name already exists in the current session.",
+    });
+  });
+
+  test("recreate after archive creates a new row; archived record unchanged", async () => {
+    const fx = await buildFixture();
+    const first = await classService.create(fx.school.id, {
+      fkSessionId: fx.session.id,
+      grade: "Grade 5",
+      section: "A",
+      label: "Grade 5 · A",
+      room: "R1",
+      periodCount: 8,
+      monthlyFee: 1000,
+    });
+    await classService.remove(first.id, fx.school.id);
+    const active = await classService.list(fx.school.id, {
+      sessionId: fx.session.id,
+    });
+    expect(active.some((row) => row.id === first.id)).toBe(false);
+
+    const archived = await classService.list(fx.school.id, {
+      sessionId: fx.session.id,
+      archived: true,
+    });
+    expect(archived.some((row) => row.id === first.id)).toBe(true);
+
+    const again = await classService.create(fx.school.id, {
+      fkSessionId: fx.session.id,
+      grade: "Grade 5",
+      section: "A",
+      label: "Grade 5 · A",
+      room: "R9",
+      periodCount: 9,
+      monthlyFee: 2000,
+    });
+    expect(again.id).not.toBe(first.id);
+    expect(again.room).toBe("R9");
+    expect(Number(again.periodCount)).toBe(9);
+
+    const archivedAfter = await classService.list(fx.school.id, {
+      sessionId: fx.session.id,
+      archived: true,
+    });
+    expect(archivedAfter.some((row) => row.id === first.id)).toBe(true);
+    const oldRow = archivedAfter.find((row) => row.id === first.id);
+    expect(oldRow.room).toBe("R1");
+  });
+
+  test("explicit restore brings archived class back when no active duplicate", async () => {
+    const fx = await buildFixture();
+    const created = await classService.create(fx.school.id, {
+      fkSessionId: fx.session.id,
+      grade: "Grade 6",
+      section: "B",
+      label: "Grade 6 · B",
+      room: "X1",
+      periodCount: 8,
+      monthlyFee: 1000,
+    });
+    await classService.remove(created.id, fx.school.id);
+    const restored = await classService.restore(created.id, fx.school.id);
+    expect(restored.id).toBe(created.id);
+    expect(restored.room).toBe("X1");
+    const active = await classService.list(fx.school.id, {
+      sessionId: fx.session.id,
+    });
+    expect(active.some((row) => row.id === created.id)).toBe(true);
+  });
+
+  test("restore rejected when active duplicate exists", async () => {
+    const fx = await buildFixture();
+    const archived = await classService.create(fx.school.id, {
+      fkSessionId: fx.session.id,
+      grade: "Grade 7",
+      section: "C",
+      label: "Grade 7 · C",
+      room: "Old",
+      periodCount: 8,
+      monthlyFee: 1000,
+    });
+    await classService.remove(archived.id, fx.school.id);
+    await classService.create(fx.school.id, {
+      fkSessionId: fx.session.id,
+      grade: "Grade 7",
+      section: "C",
+      label: "Grade 7 · C",
+      room: "New",
+      periodCount: 8,
+      monthlyFee: 1000,
+    });
+    await expect(
+      classService.restore(archived.id, fx.school.id),
+    ).rejects.toMatchObject({ statusCode: 409 });
+  });
 });
