@@ -4,6 +4,7 @@ const bodyParser = require("body-parser");
 const helmet = require("helmet");
 const router = require("./routes");
 const ApiError = require("./utils/ApiError");
+const { UniqueConstraintError, ValidationError } = require("sequelize");
 const { isDbConnectivityError } = require("./utils/errors");
 const { ALLOWED_ORIGINS } = require("./constants");
 const logger = require("./utils/logger");
@@ -57,10 +58,26 @@ app.use((req, res) => {
 app.use((err, req, res, next) => {
   if (res.headersSent) return next(err);
 
-  const statusCode = err.statusCode || err.status || err.code || 500;
+  let statusCode = err.statusCode || err.status || 500;
   let message = err.message || "Internal Server Error";
 
-  if (!(err instanceof ApiError) && isDbConnectivityError(err, message)) {
+  if (err instanceof UniqueConstraintError) {
+    statusCode = 409;
+    const constraint = err.parent?.constraint || err.original?.constraint || "";
+    if (constraint.includes("teacher")) {
+      message = "That teacher is already booked for this period.";
+    } else if (constraint.includes("class")) {
+      message = "This class already has a lesson in this period.";
+    } else {
+      message = "That record already exists.";
+    }
+  } else if (err instanceof ValidationError) {
+    statusCode = 400;
+    const details = (err.errors || [])
+      .map((item) => item.message)
+      .filter(Boolean);
+    message = details.length ? details.join(" ") : "The submitted values are not valid.";
+  } else if (!(err instanceof ApiError) && isDbConnectivityError(err, message)) {
     message = "Connection error. Please contact support.";
   }
 

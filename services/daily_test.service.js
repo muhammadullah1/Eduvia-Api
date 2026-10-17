@@ -9,6 +9,7 @@ const {
   Students,
   Subjects,
   Classes,
+  ClassSubjects,
   TimetableSlots,
   sequelize,
 } = require("../models");
@@ -21,9 +22,9 @@ const { datesForWeekday, weekOfMonth, monthKey } = require("../utils/dates");
 const { summarizeMonth, isPassedScore } = require("../utils/monthly_status");
 
 /**
- * Weekly subject tests (UR-05/06, BR-06/07/08). Management fixes one test day
- * per class+subject; tests for a month are generated from that schedule;
- * teachers enter marks; parents see marks only once a test is published.
+ * Weekly subject tests (UR-05/06, BR-06/07/08). Each class has one test day
+ * per subject. Several subjects may fall on the same weekday. The month's
+ * tests are generated from those days; parents see marks only once published.
  */
 
 const scheduleInclude = [
@@ -46,9 +47,26 @@ async function saveSchedule(actor, { classId, subjectId, weekday, periodIndex, m
     Subjects.findOne({ where: { id: subjectId, fkSchoolId: actor.schoolId } }),
   ]);
   if (!klass || !subject) throw new ApiError(404, "Class or subject not found");
+  const offered = await ClassSubjects.findOne({
+    where: { fkClassId: klass.id, fkSubjectId: subject.id },
+  });
+  if (!offered) {
+    throw new ApiError(400, `${klass.label} does not take ${subject.name}.`);
+  }
+  const onDay = await TimetableSlots.findOne({
+    where: { fkClassId: klass.id, fkSubjectId: subject.id, day: weekday },
+  });
+  if (!onDay) {
+    throw new ApiError(
+      400,
+      `${subject.name} is not on the ${weekday} timetable for ${klass.label}.`
+    );
+  }
   if (periodIndex && periodIndex > klass.periodCount) throw new ApiError(400, `${klass.label} only has ${klass.periodCount} periods.`);
-  const values = { weekday, periodIndex: periodIndex || null, maxScore: maxScore || 20, fkCreatedByUserId: actor.id };
-  const existing = await DailyTestSchedules.findOne({ where: { fkClassId: klass.id, fkSubjectId: subject.id, isActive: true } });
+  const values = { weekday, maxScore: maxScore || 20 };
+  const existing = await DailyTestSchedules.findOne({
+    where: { fkClassId: klass.id, fkSubjectId: subject.id, dayOfWeek: weekday },
+  });
   const row = existing
     ? await existing.update(values)
     : await DailyTestSchedules.create({ ...values, fkSchoolId: actor.schoolId, fkClassId: klass.id, fkSubjectId: subject.id });
@@ -62,7 +80,7 @@ async function saveSchedule(actor, { classId, subjectId, weekday, periodIndex, m
 async function deactivateSchedule(actor, id) {
   const row = await DailyTestSchedules.findOne({ where: { id, fkSchoolId: actor.schoolId } });
   if (!row) throw new ApiError(404, "Schedule not found");
-  await row.update({ isActive: false });
+  await row.destroy();
   return row;
 }
 

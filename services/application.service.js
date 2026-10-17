@@ -26,6 +26,12 @@ const ApiError = require("../utils/ApiError");
 const settingsService = require("./settings.service");
 const feeService = require("./fee.service");
 const auditService = require("./audit.service");
+const r2Service = require("./r2.service");
+const {
+  isValidPhonePk,
+  normalizePhonePk,
+} = require("../utils/pakistan");
+const { resolveAdmissionUiStatus } = require("../utils/admissionUiStatus");
 
 const RELATIONS = new Set(["Father", "Mother", "Guardian", "Other"]);
 const PLACEHOLDER_FILE = "pending://local";
@@ -149,7 +155,13 @@ async function columnsFrom(schoolId, data, transaction) {
     out.applicantLastName = parts.slice(1).join(" ") || "-";
   }
   if (data.guardian != null) out.parentName = data.guardian;
-  if (data.phone != null) out.parentPhone = data.phone;
+  if (data.phone != null) {
+    const normalized = normalizePhonePk(data.phone);
+    if (data.phone && !isValidPhonePk(data.phone)) {
+      throw new ApiError(400, "Enter a valid Pakistani mobile number (e.g. 03XX XXXXXXX)");
+    }
+    out.parentPhone = normalized || data.phone;
+  }
   if (data.email != null) out.parentEmail = String(data.email).trim().toLowerCase();
   if (data.dob != null) out.dateOfBirth = data.dob;
   if (data.decision !== undefined) out.decision = data.decision || null;
@@ -179,6 +191,20 @@ async function columnsFrom(schoolId, data, transaction) {
     out.gradeApplyingFor = klass.label;
     out.fkClassId = klass.id;
   }
+  if (data.interviewDate !== undefined && data.interviewDate) {
+    const d = String(data.interviewDate).slice(0, 10);
+    const min = new Date().toISOString().slice(0, 10);
+    const maxDate = new Date();
+    maxDate.setMonth(maxDate.getMonth() + 18);
+    const max = maxDate.toISOString().slice(0, 10);
+    if (d < min || d > max) {
+      throw new ApiError(
+        400,
+        `Interview date must be between ${min} and ${max}`,
+      );
+    }
+    out.interviewDate = d;
+  }
   return out;
 }
 
@@ -197,8 +223,14 @@ async function syncDocuments(applicationId, documents, transaction) {
     const label = doc.label || doc.title;
     if (!label) continue;
     const status = doc.status || "Pending";
-    const fileUrl =
-      status === "Pending" ? null : doc.fileUrl || PLACEHOLDER_FILE;
+    let fileUrl = null;
+    if (status !== "Pending") {
+      if (doc.fileUrl && String(doc.fileUrl).startsWith("http")) {
+        fileUrl = doc.fileUrl;
+      } else {
+        fileUrl = doc.fileUrl || PLACEHOLDER_FILE;
+      }
+    }
     if (doc.id) {
       await ApplicationDocuments.update(
         { title: label, status, ...(fileUrl ? { fileUrl } : {}) },
@@ -248,11 +280,82 @@ function validateForSubmit(row) {
   if (!row.parentName || row.parentName === "Pending") missing.push("guardian");
   if (!row.parentPhone || row.parentPhone === "0000000000") {
     missing.push("guardian phone");
+  } else if (!isValidPhonePk(row.parentPhone)) {
+    throw new ApiError(400, "Guardian phone must be a valid Pakistani mobile number");
   }
   if (!row.address) missing.push("address");
   if (missing.length) {
     throw new ApiError(400, `Cannot submit: missing ${missing.join(", ")}`);
   }
+}
+
+async function statusSummary(schoolId) {
+  const rows = await Applications.findAll({
+    where: { fkSchoolId: schoolId },
+    attributes: [
+      "status",
+      "submittedOn",
+      "interviewDate",
+      "interviewScore",
+      "interviewResult",
+    ],
+    raw: true,
+  });
+  const counts = {
+    all: rows.length,
+    draft: 0,
+    submitted: 0,
+    under_review: 0,
+    test_interview: 0,
+    admitted: 0,
+    rejected: 0,
+    waitlisted: 0,
+    withdrawn: 0,
+  };
+  for (const row of rows) {
+    const bucket = resolveAdmissionUiStatus(row);
+    if (counts[bucket] !== undefined) counts[bucket] += 1;
+  }
+  return counts;
+}
+
+async function presignDocumentUpload(
+  id,
+  schoolId,
+  { documentId, contentType, fileName },
+) {
+  const row = await getById(id, schoolId);
+  assertEditable(row);
+  const doc = await ApplicationDocuments.findOne({
+    where: { id: documentId, fkApplicationId: id },
+  });
+  if (!doc) throw new ApiError(404, "Document not found");
+  const safeName = String(fileName || "file")
+    .replace(/[^a-zA-Z0-9._-]/g, "_")
+    .slice(0, 120);
+  const key = `schools/${schoolId}/applications/${id}/${documentId}-${Date.now()}-${safeName}`;
+  const presigned = await r2Service.createPresignedUpload({
+    key,
+    contentType,
+  });
+  return {
+    documentId: doc.id,
+    ...presigned,
+  };
+}
+
+async function clearDocumentFile(id, schoolId, documentId) {
+  return sequelize.transaction(async (t) => {
+    const row = await lockApplication(id, schoolId, t);
+    assertEditable(row);
+    const doc = await ApplicationDocuments.findOne({
+      where: { id: documentId, fkApplicationId: id },
+      transaction: t,
+    });
+    if (!doc) throw new ApiError(404, "Document not found");
+    await doc.update({ status: "Pending", fileUrl: null }, { transaction: t });
+    return getById(id, schoolId, { transaction: t });
+  });
 }
 
 async function createDraft(schoolId, data = {}) {
@@ -555,6 +658,7 @@ async function enroll(id, schoolId, { admissionNo } = {}, actor) {
 
 module.exports = {
   list,
+  statusSummary,
   getById,
   createDraft,
   create,
@@ -563,4 +667,6 @@ module.exports = {
   markUnderReview,
   decide,
   enroll,
+  presignDocumentUpload,
+  clearDocumentFile,
 };

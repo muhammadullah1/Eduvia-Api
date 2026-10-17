@@ -10,6 +10,7 @@ const router = express.Router();
 const manage = authorize("timetable.manage");
 
 router.get("/", authorize("timetable.read"), validate(v.validateList), c.list);
+router.post("/batch", manage, validate(v.validateBatch), c.batch);
 router.post("/", manage, validate(v.validateCreate), c.create);
 router.patch("/:id", manage, validate(v.validateUpdate), c.update);
 router.delete("/:id", manage, validate(v.validateId), c.remove);

@@ -22,6 +22,15 @@ module.exports = {
       title: Joi.string().max(200),
       description: Joi.string().allow("", null),
       targetDate: isoDay.allow(null),
+      status: Joi.string().valid("Planned", "InProgress", "Completed"),
+      sequence: Joi.number().integer().min(1),
     }).min(1),
+  },
+  validateReorder: {
+    body: Joi.object({
+      classId: id.required(),
+      subjectId: id.required(),
+      orderedIds: Joi.array().items(id).min(1).required(),
+    }),
   },
 };

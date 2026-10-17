@@ -5,7 +5,11 @@ const { subjectService } = require("../services");
 module.exports = {
   list: async (req, res, next) => {
     try {
-      const data = await subjectService.list(req.user.schoolId);
+      const archived = req.query.archived === "1" || req.query.archived === "true";
+      const data = await subjectService.list(req.user.schoolId, {
+        archived,
+        search: req.query.search,
+      });
       res.status(200).json({ success: true, message: "Subjects", data });
     } catch (err) {
       next(err);
@@ -30,7 +34,15 @@ module.exports = {
   remove: async (req, res, next) => {
     try {
       await subjectService.remove(req.params.id, req.user.schoolId);
-      res.status(200).json({ success: true, message: "Subject deleted" });
+      res.status(200).json({ success: true, message: "Subject archived" });
+    } catch (err) {
+      next(err);
+    }
+  },
+  restore: async (req, res, next) => {
+    try {
+      const data = await subjectService.restore(req.params.id, req.user.schoolId);
+      res.status(200).json({ success: true, message: "Subject restored", data });
     } catch (err) {
       next(err);
     }
