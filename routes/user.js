@@ -23,5 +23,6 @@ router.patch(
   c.update
 );
 router.delete("/:id", authorize("users.create"), validate(v.validateId), c.remove);
+router.post("/:id/restore", authorize("users.create"), validate(v.validateId), c.restore);
 
 module.exports = router;

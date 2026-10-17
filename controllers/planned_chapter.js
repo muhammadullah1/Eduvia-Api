@@ -8,4 +8,5 @@ module.exports = {
   create: handle("Planned chapter created", (req) => plannedChapterService.create(req.user, req.body), 201),
   update: handle("Planned chapter updated", (req) => plannedChapterService.update(req.user, req.params.id, req.body)),
   remove: handle("Planned chapter removed", (req) => plannedChapterService.remove(req.user, req.params.id)),
+  reorder: handle("Chapters reordered", (req) => plannedChapterService.reorder(req.user, req.body)),
 };

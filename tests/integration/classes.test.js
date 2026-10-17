@@ -136,7 +136,7 @@ describe("class service", () => {
     });
   });
 
-  test("recreate after archive creates a new row; archived record unchanged", async () => {
+  test("recreate after archive is rejected and points to restore", async () => {
     const fx = await buildFixture();
     const first = await classService.create(fx.school.id, {
       fkSessionId: fx.session.id,
@@ -159,18 +159,20 @@ describe("class service", () => {
     });
     expect(archived.some((row) => row.id === first.id)).toBe(true);
 
-    const again = await classService.create(fx.school.id, {
-      fkSessionId: fx.session.id,
-      grade: "Grade 5",
-      section: "A",
-      label: "Grade 5 · A",
-      room: "R9",
-      periodCount: 9,
-      monthlyFee: 2000,
+    await expect(
+      classService.create(fx.school.id, {
+        fkSessionId: fx.session.id,
+        grade: "Grade 5",
+        section: "A",
+        label: "Grade 5 · A",
+        room: "R9",
+        periodCount: 9,
+        monthlyFee: 2000,
+      }),
+    ).rejects.toMatchObject({
+      statusCode: 409,
+      message: expect.stringMatching(/archive/i),
     });
-    expect(again.id).not.toBe(first.id);
-    expect(again.room).toBe("R9");
-    expect(Number(again.periodCount)).toBe(9);
 
     const archivedAfter = await classService.list(fx.school.id, {
       sessionId: fx.session.id,
@@ -202,29 +204,4 @@ describe("class service", () => {
     expect(active.some((row) => row.id === created.id)).toBe(true);
   });
 
-  test("restore rejected when active duplicate exists", async () => {
-    const fx = await buildFixture();
-    const archived = await classService.create(fx.school.id, {
-      fkSessionId: fx.session.id,
-      grade: "Grade 7",
-      section: "C",
-      label: "Grade 7 · C",
-      room: "Old",
-      periodCount: 8,
-      monthlyFee: 1000,
-    });
-    await classService.remove(archived.id, fx.school.id);
-    await classService.create(fx.school.id, {
-      fkSessionId: fx.session.id,
-      grade: "Grade 7",
-      section: "C",
-      label: "Grade 7 · C",
-      room: "New",
-      periodCount: 8,
-      monthlyFee: 1000,
-    });
-    await expect(
-      classService.restore(archived.id, fx.school.id),
-    ).rejects.toMatchObject({ statusCode: 409 });
-  });
 });

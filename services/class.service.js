@@ -111,6 +111,16 @@ async function getById(id, schoolId) {
 async function create(schoolId, data) {
   const { fkSessionId, grade, section } = data;
   await assertNoActiveDuplicate(schoolId, fkSessionId, grade, section);
+  const archived = await Classes.findOne({
+    where: { fkSchoolId: schoolId, fkSessionId, grade, section },
+    paranoid: false,
+  });
+  if (isArchivedClass(archived)) {
+    throw new ApiError(
+      409,
+      `A class named "${grade}" is already in the archive for this session. Restore it from Settings → Archives instead of creating a new one.`,
+    );
+  }
   return Classes.create({ ...data, fkSchoolId: schoolId, status: "Active" });
 }
 

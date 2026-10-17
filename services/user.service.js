@@ -1,6 +1,7 @@
 "use strict";
 
 const bcrypt = require("bcryptjs");
+const { Op } = require("sequelize");
 const {
   Users,
   Teachers,
@@ -57,14 +58,16 @@ async function update(userId, userData, options = {}) {
   return updated;
 }
 
-async function listBySchool(schoolId, { role, page = 1, pageSize = 20 } = {}) {
+async function listBySchool(schoolId, { role, page = 1, pageSize = 20, archived } = {}) {
   const where = { fkSchoolId: schoolId };
   if (role) where.role = role;
+  if (archived) where.archived_at = { [Op.ne]: null };
   const limit = Math.min(Number(pageSize) || 20, 1000);
   const offset = (Math.max(Number(page) || 1, 1) - 1) * limit;
   const { rows, count } = await Users.findAndCountAll({
     where,
     ...defaultExcludePassword,
+    paranoid: !archived,
     order: [["created_at", "DESC"]],
     limit,
     offset,
@@ -103,6 +106,16 @@ async function createStaffUser(actor, payload) {
   }
   const existing = await findByEmail(email.toLowerCase(), { schoolId });
   if (existing) throw new ApiError(409, "Email already in use");
+  const archivedUser = await findByEmail(email.toLowerCase(), {
+    schoolId,
+    paranoid: false,
+  });
+  if (archivedUser && archivedUser.deletedAt) {
+    throw new ApiError(
+      409,
+      `A user with email ${email.toLowerCase()} is already in the archive. Restore them from Settings → Archives instead of creating a new account.`,
+    );
+  }
   if (phone) {
     const phoneTrimmed = String(phone).trim();
     if (!isValidPhonePk(phoneTrimmed)) {
@@ -234,6 +247,36 @@ async function removeStaffUser(actor, userId) {
   return { deleted: true };
 }
 
+async function restoreStaffUser(actor, userId) {
+  const user = await Users.findOne({
+    where: { id: userId, fkSchoolId: actor.schoolId },
+    paranoid: false,
+  });
+  if (!user || !user.deletedAt) throw new ApiError(404, "Archived user not found");
+  if (actor.role !== USER_ROLES.SUPER_ADMIN && user.role !== USER_ROLES.TEACHER) {
+    throw new ApiError(403, "Only the super admin can restore non-teaching staff.");
+  }
+  const emailClash = await Users.findOne({
+    where: {
+      fkSchoolId: actor.schoolId,
+      email: user.email,
+      id: { [Op.ne]: user.id },
+    },
+  });
+  if (emailClash) {
+    throw new ApiError(409, "An active user already uses this email.");
+  }
+  await user.restore();
+  const teacher = await Teachers.findOne({
+    where: { fkUserId: user.id, fkSchoolId: actor.schoolId },
+    paranoid: false,
+  });
+  if (teacher && teacher.deletedAt) await teacher.restore();
+  const json = user.toJSON();
+  delete json.password;
+  return json;
+}
+
 async function resendInvitation(actor, userId) {
   const user = await Users.findOne({
     where: { id: userId, fkSchoolId: actor.schoolId },
@@ -260,5 +303,6 @@ module.exports = {
   createStaffUser,
   updateStaffUser,
   removeStaffUser,
+  restoreStaffUser,
   resendInvitation,
 };

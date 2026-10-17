@@ -38,6 +38,12 @@ module.exports = (sequelize, DataTypes) => {
         allowNull: false,
         field: "fk_subject_id",
       },
+      totalMarks: {
+        type: DataTypes.INTEGER,
+        allowNull: false,
+        defaultValue: 20,
+        field: "total_marks",
+      },
     },
     {
       tableName: "daily_test_schedules",
@@ -51,10 +57,16 @@ module.exports = (sequelize, DataTypes) => {
         weekday() {
           return this.getDataValue("dayOfWeek");
         },
+        maxScore() {
+          return this.getDataValue("totalMarks");
+        },
       },
       setterMethods: {
         weekday(val) {
           this.setDataValue("dayOfWeek", val);
+        },
+        maxScore(val) {
+          this.setDataValue("totalMarks", val);
         },
       },
     }

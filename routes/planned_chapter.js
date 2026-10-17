@@ -10,6 +10,7 @@ const router = express.Router();
 const manage = authorize("chapters.manage");
 
 router.get("/", authorize("chapters.read"), validate(v.validateList), c.list);
+router.post("/reorder", manage, validate(v.validateReorder), c.reorder);
 router.post("/", manage, validate(v.validateCreate), c.create);
 router.patch("/:id", manage, validate(v.validateUpdate), c.update);
 router.delete("/:id", manage, validate(v.validateId), c.remove);
