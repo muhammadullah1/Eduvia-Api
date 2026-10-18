@@ -7,9 +7,12 @@ module.exports = {
     try {
       const includeStats =
         req.query.stats === "true" || req.query.stats === "1";
+      const archived =
+        req.query.archived === "true" || req.query.archived === "1";
       const data = await classService.list(req.user.schoolId, {
         sessionId: req.query.sessionId,
         includeStats,
+        archived,
       });
       res.status(200).json({ success: true, message: "Classes", data });
     } catch (err) {
@@ -35,7 +38,15 @@ module.exports = {
   remove: async (req, res, next) => {
     try {
       await classService.remove(req.params.id, req.user.schoolId);
-      res.status(200).json({ success: true, message: "Class deleted" });
+      res.status(200).json({ success: true, message: "Class archived" });
+    } catch (err) {
+      next(err);
+    }
+  },
+  restore: async (req, res, next) => {
+    try {
+      const data = await classService.restore(req.params.id, req.user.schoolId);
+      res.status(200).json({ success: true, message: "Class restored", data });
     } catch (err) {
       next(err);
     }

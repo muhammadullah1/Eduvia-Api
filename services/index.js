@@ -21,6 +21,8 @@ module.exports = {
   dailyTestService: require("./daily_test.service"),
   plannedChapterService: require("./planned_chapter.service"),
   settingsService: require("./settings.service"),
+  blockDateService: require("./block_date.service"),
+  locationService: require("./location.service"),
   accessService: require("./access.service"),
   expenseService: require("./expense.service"),
   noticeService: require("./notice.service"),

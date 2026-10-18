@@ -10,8 +10,22 @@ const router = express.Router();
 const can = authorize("admissions.manage");
 
 router.get("/", can, validate(v.validateList), c.list);
+router.get("/summary", can, c.summary);
 router.post("/drafts", can, validate(v.validateCreateDraft), c.createDraft);
 router.get("/:id", can, validate(v.validateId), c.getById);
+router.post(
+  "/:id/documents/presign",
+  can,
+  validate(v.validateId),
+  validate(v.validatePresignDocument),
+  c.presignDocument,
+);
+router.delete(
+  "/:id/documents/:documentId",
+  can,
+  validate(v.validateDocumentId),
+  c.clearDocument,
+);
 router.post("/", can, validate(v.validateCreate), c.create);
 router.patch("/:id", can, validate(v.validateId), validate(v.validateUpdate), c.update);
 router.post("/:id/submit", can, validate(v.validateId), c.submit);

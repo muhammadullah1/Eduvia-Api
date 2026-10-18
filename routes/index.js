@@ -50,6 +50,8 @@ router.use("/teacher-absences", teacherAbsenceRouter);
 router.use("/daily-lessons", dailyLessonRouter);
 router.use("/daily-tests", dailyTestRouter);
 router.use("/planned-chapters", plannedChapterRouter);
+router.use("/settings/block-dates", require("./block_date"));
+router.use("/settings/locations", require("./location"));
 router.use("/settings", settingsRouter);
 router.use("/audit-logs", auditRouter);
 router.use("/leave-requests", leaveRouter);

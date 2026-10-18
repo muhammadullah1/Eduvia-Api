@@ -13,6 +13,18 @@ function serializeEnrollResult(result) {
 }
 
 module.exports = {
+  summary: async (req, res, next) => {
+    try {
+      const counts = await applicationService.statusSummary(req.user.schoolId);
+      res.status(200).json({
+        success: true,
+        message: "Application summary fetched",
+        data: counts,
+      });
+    } catch (err) {
+      next(err);
+    }
+  },
   list: async (req, res, next) => {
     try {
       const result = await applicationService.list(req.user.schoolId, req.query);
@@ -140,6 +152,38 @@ module.exports = {
         success: true,
         message: "Student enrolled",
         data: serializeEnrollResult(result),
+      });
+    } catch (err) {
+      next(err);
+    }
+  },
+  presignDocument: async (req, res, next) => {
+    try {
+      const data = await applicationService.presignDocumentUpload(
+        req.params.id,
+        req.user.schoolId,
+        req.body,
+      );
+      res.status(200).json({
+        success: true,
+        message: "Upload URL created",
+        data,
+      });
+    } catch (err) {
+      next(err);
+    }
+  },
+  clearDocument: async (req, res, next) => {
+    try {
+      const row = await applicationService.clearDocumentFile(
+        req.params.id,
+        req.user.schoolId,
+        req.params.documentId,
+      );
+      res.status(200).json({
+        success: true,
+        message: "Document cleared",
+        data: serializeApplication(row),
       });
     } catch (err) {
       next(err);

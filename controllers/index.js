@@ -20,6 +20,8 @@ module.exports = {
   dailyTestController: require("./daily_test"),
   plannedChapterController: require("./planned_chapter"),
   settingsController: require("./settings"),
+  blockDateController: require("./block_date"),
+  locationController: require("./location"),
   auditController: require("./audit"),
   expenseController: require("./expense"),
   noticeController: require("./notice"),

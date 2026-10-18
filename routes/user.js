@@ -10,5 +10,19 @@ const router = express.Router();
 
 router.get("/", authorize("users.read"), c.list);
 router.post("/", authorize("users.create"), validate(v.validateCreate), c.create);
+router.post(
+  "/:id/resend-invitation",
+  authorize("users.create"),
+  validate(v.validateId),
+  c.resendInvitation
+);
+router.patch(
+  "/:id",
+  authorize("users.create"),
+  validate(v.validateUpdate),
+  c.update
+);
+router.delete("/:id", authorize("users.create"), validate(v.validateId), c.remove);
+router.post("/:id/restore", authorize("users.create"), validate(v.validateId), c.restore);
 
 module.exports = router;
