@@ -44,6 +44,11 @@ module.exports = {
         onUpdate: "CASCADE",
         onDelete: "CASCADE",
       },
+      total_marks: {
+        type: Sequelize.INTEGER,
+        allowNull: false,
+        defaultValue: 20,
+      },
       created_at: {
         allowNull: false,
         type: Sequelize.DATE,
@@ -60,10 +65,11 @@ module.exports = {
       },
     });
 
-    await queryInterface.addIndex("daily_test_schedules", ["fk_class_id", "day_of_week"], {
-      unique: true,
-      name: "idx_daily_test_schedules_class_day_unique",
-    });
+    await queryInterface.sequelize.query(`
+      CREATE UNIQUE INDEX idx_daily_test_schedules_class_subject_day_active
+      ON daily_test_schedules (fk_class_id, fk_subject_id, day_of_week)
+      WHERE archived_at IS NULL
+    `);
 
     await queryInterface.addIndex("daily_test_schedules", ["fk_school_id"], {
       name: "idx_daily_test_schedules_school",

@@ -32,7 +32,7 @@ module.exports = {
       },
       fk_teacher_id: {
         type: Sequelize.INTEGER,
-        allowNull: false,
+        allowNull: true,
         references: {
           model: "teachers",
           key: "id",
@@ -86,15 +86,16 @@ module.exports = {
       },
     });
 
-    await queryInterface.addIndex("timetable_slots", ["fk_class_id", "day_of_week", "period_index"], {
-      unique: true,
-      name: "idx_timetable_class_day_period_unique",
-    });
-
-    await queryInterface.addIndex("timetable_slots", ["fk_school_id", "fk_teacher_id", "day_of_week", "period_index"], {
-      unique: true,
-      name: "idx_timetable_teacher_day_period_unique",
-    });
+    await queryInterface.sequelize.query(`
+      CREATE UNIQUE INDEX idx_timetable_class_day_period_unique
+      ON timetable_slots (fk_class_id, day_of_week, period_index)
+      WHERE archived_at IS NULL
+    `);
+    await queryInterface.sequelize.query(`
+      CREATE UNIQUE INDEX idx_timetable_teacher_day_period_unique
+      ON timetable_slots (fk_school_id, fk_teacher_id, day_of_week, period_index)
+      WHERE archived_at IS NULL AND fk_teacher_id IS NOT NULL
+    `);
 
     await queryInterface.addIndex("timetable_slots", ["fk_school_id", "fk_class_id"], {
       name: "idx_timetable_slots_school_class",
