@@ -17,22 +17,20 @@ module.exports = {
         onUpdate: "CASCADE",
         onDelete: "CASCADE",
       },
+      fk_session_id: {
+        type: Sequelize.INTEGER,
+        allowNull: false,
+        references: { model: "academic_sessions", key: "id" },
+        onUpdate: "CASCADE",
+        onDelete: "RESTRICT",
+      },
       name: {
         type: Sequelize.STRING(120),
-        allowNull: false
-      },
-      room_name: {
-        type: Sequelize.STRING(120),
-        allowNull: false
-      },
-      room_code: {
-        type: Sequelize.STRING(40),
-        allowNull: true
-      },
-      selection_type: {
-        type: Sequelize.ENUM("home", "away"),
         allowNull: false,
-        defaultValue: "home",
+      },
+      location_code: {
+        type: Sequelize.STRING(40),
+        allowNull: true,
       },
       location_type: {
         type: Sequelize.STRING(40),
@@ -40,7 +38,7 @@ module.exports = {
       },
       description: {
         type: Sequelize.TEXT,
-        allowNull: true
+        allowNull: true,
       },
       capacity: {
         type: Sequelize.INTEGER,
@@ -60,19 +58,24 @@ module.exports = {
       archived_at: { type: Sequelize.DATE, allowNull: true },
     });
     await queryInterface.sequelize.query(`
-      CREATE UNIQUE INDEX idx_locations_school_room_active_unique
-      ON locations (fk_school_id, lower(room_name))
+      CREATE UNIQUE INDEX idx_locations_session_name_active_unique
+      ON locations (fk_school_id, fk_session_id, lower(name))
       WHERE archived_at IS NULL
+    `);
+    await queryInterface.sequelize.query(`
+      CREATE UNIQUE INDEX idx_locations_session_code_active_unique
+      ON locations (fk_school_id, fk_session_id, lower(location_code))
+      WHERE archived_at IS NULL AND location_code IS NOT NULL AND btrim(location_code) <> ''
     `);
   },
 
   async down(queryInterface) {
     await queryInterface.sequelize.query(
-      "DROP INDEX IF EXISTS idx_locations_school_room_active_unique",
+      "DROP INDEX IF EXISTS idx_locations_session_code_active_unique",
+    );
+    await queryInterface.sequelize.query(
+      "DROP INDEX IF EXISTS idx_locations_session_name_active_unique",
     );
     await queryInterface.dropTable("locations");
-    await queryInterface.sequelize.query(
-      'DROP TYPE IF EXISTS "enum_locations_selection_type";',
-    );
   },
 };

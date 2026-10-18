@@ -66,6 +66,10 @@ module.exports = {
         allowNull: false,
         defaultValue: "Active",
       },
+      period_start_times: {
+        type: Sequelize.JSONB,
+        allowNull: true,
+      },
       created_at: {
         allowNull: false,
         type: Sequelize.DATE,
@@ -82,10 +86,11 @@ module.exports = {
       },
     });
 
-    await queryInterface.addIndex("classes", ["fk_school_id", "fk_session_id", "grade", "section"], {
-      unique: true,
-      name: "idx_classes_school_session_grade_section_unique",
-    });
+    await queryInterface.sequelize.query(`
+      CREATE UNIQUE INDEX idx_classes_school_session_grade_section_active_unique
+      ON classes (fk_school_id, fk_session_id, grade, section)
+      WHERE archived_at IS NULL
+    `);
 
     await queryInterface.addIndex("classes", ["fk_school_id", "fk_session_id"], {
       name: "idx_classes_school_session",
