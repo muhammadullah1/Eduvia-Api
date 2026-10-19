@@ -6,8 +6,8 @@ const ApiError = require("../utils/ApiError");
 
 async function signIn(req, res, next) {
   try {
-    const { email, password } = req.body;
-    const { user, token, portal } = await authService.signIn(email, password);
+    const { email, password, schoolId } = req.body;
+    const { user, token, portal } = await authService.signIn(email, password, schoolId);
     return res.status(200).json({
       success: true,
       message: "User signed in successfully",

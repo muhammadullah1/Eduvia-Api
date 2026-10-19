@@ -10,7 +10,7 @@ module.exports = {
       section: Joi.string().required(),
       label: Joi.string().required(),
       room: Joi.string().allow("", null),
-      periodCount: Joi.number().integer().min(1).max(16).default(8),
+      periodCount: Joi.number().integer().min(3).max(9).default(8),
       monthlyFee: Joi.number().min(0).default(0),
       periodStartTimes: Joi.object()
         .pattern(Joi.string().pattern(/^\d+$/), Joi.string().pattern(/^\d{2}:\d{2}$/))
@@ -31,7 +31,7 @@ module.exports = {
       section: Joi.string(),
       label: Joi.string(),
       room: Joi.string().allow("", null),
-      periodCount: Joi.number().integer().min(1).max(16),
+      periodCount: Joi.number().integer().min(3).max(9),
       monthlyFee: Joi.number().min(0),
       periodStartTimes: Joi.object()
         .pattern(Joi.string().pattern(/^\d+$/), Joi.string().pattern(/^\d{2}:\d{2}$/))

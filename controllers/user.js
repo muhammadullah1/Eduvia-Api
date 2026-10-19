@@ -23,6 +23,14 @@ module.exports = {
       next(err);
     }
   },
+  presignPhoto: async (req, res, next) => {
+    try {
+      const data = await userService.presignStaffPhoto(req.user, req.body);
+      res.status(200).json({ success: true, message: "Upload URL", data });
+    } catch (err) {
+      next(err);
+    }
+  },
   create: async (req, res, next) => {
     try {
       const user = await userService.createStaffUser(req.user, req.body);

@@ -9,13 +9,13 @@ const {
   Students,
   Subjects,
   Classes,
-  ClassSubjects,
   TimetableSlots,
   sequelize,
 } = require("../models");
 const { USER_ROLES, DAILY_TEST_STATUS, SETTING_KEYS, STUDENT_STATUS } = require("../constants");
 const ApiError = require("../utils/ApiError");
 const accessService = require("./access.service");
+const classSubjectService = require("./class_subject.service");
 const auditService = require("./audit.service");
 const settingsService = require("./settings.service");
 const { datesForWeekday, weekOfMonth, monthKey } = require("../utils/dates");
@@ -47,12 +47,11 @@ async function saveSchedule(actor, { classId, subjectId, weekday, periodIndex, m
     Subjects.findOne({ where: { id: subjectId, fkSchoolId: actor.schoolId } }),
   ]);
   if (!klass || !subject) throw new ApiError(404, "Class or subject not found");
-  const offered = await ClassSubjects.findOne({
-    where: { fkClassId: klass.id, fkSubjectId: subject.id },
-  });
-  if (!offered) {
+  const offered = await classSubjectService.offeredSubjectIds(actor.schoolId, klass.id);
+  if (!offered.includes(Number(subject.id))) {
     throw new ApiError(400, `${klass.label} does not take ${subject.name}.`);
   }
+  await classSubjectService.ensureOffered(klass.id, subject.id);
   const onDay = await TimetableSlots.findOne({
     where: { fkClassId: klass.id, fkSubjectId: subject.id, day: weekday },
   });

@@ -29,6 +29,24 @@ module.exports = (sequelize, DataTypes) => {
         type: DataTypes.STRING(100),
         allowNull: false,
       },
+      examType: {
+        type: DataTypes.STRING(40),
+        allowNull: false,
+        defaultValue: "Mid-Term",
+        field: "exam_type",
+      },
+      totalMarks: {
+        type: DataTypes.DECIMAL(5, 2),
+        allowNull: false,
+        defaultValue: 100,
+        field: "total_marks",
+      },
+      passingMarks: {
+        type: DataTypes.DECIMAL(5, 2),
+        allowNull: false,
+        defaultValue: 40,
+        field: "passing_marks",
+      },
       startDate: {
         type: DataTypes.DATEONLY,
         allowNull: true,
@@ -40,7 +58,14 @@ module.exports = (sequelize, DataTypes) => {
         field: "end_date",
       },
       status: {
-        type: DataTypes.ENUM("Draft", "Published", "Archived"),
+        type: DataTypes.ENUM(
+          "Draft",
+          "Scheduled",
+          "Marks Pending",
+          "Finalised",
+          "Published",
+          "Archived"
+        ),
         allowNull: false,
         defaultValue: "Draft",
       },

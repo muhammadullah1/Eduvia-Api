@@ -148,6 +148,7 @@ exports.SETTING_DEFAULTS = {
   resultVisibility: {
     feeRule: exports.RESULT_FEE_RULES.ALL_DUE_PAID,
     requireOverrideReason: true,
+    rankTie: "shared",
   },
   fees: {
     defaultMonthlyFee: 8500,

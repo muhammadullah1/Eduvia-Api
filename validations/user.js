@@ -16,13 +16,19 @@ const phoneSchema = Joi.string()
 
 module.exports = {
   validateId: idParam,
+  validatePhotoPresign: {
+    body: Joi.object({
+      contentType: Joi.string().valid("image/jpeg", "image/png", "image/webp").required(),
+      fileName: Joi.string().max(120).allow("", null),
+    }),
+  },
   validateCreate: {
     body: Joi.object({
       firstName: Joi.string().required(),
       lastName: Joi.string().required(),
       email: Joi.string().email().required(),
       phone: phoneSchema,
-      password: Joi.string().min(8).required(),
+      password: Joi.string().min(8),
       role: Joi.string()
         .valid(USER_ROLES.SUPER_ADMIN, USER_ROLES.OPERATIONS_MANAGER, USER_ROLES.ACCOUNTANT, USER_ROLES.TEACHER)
         .required(),

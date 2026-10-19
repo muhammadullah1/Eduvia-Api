@@ -31,6 +31,12 @@ module.exports = (sequelize, DataTypes) => {
         defaultValue: false,
         field: "is_absent",
       },
+      isExempt: {
+        type: DataTypes.BOOLEAN,
+        allowNull: false,
+        defaultValue: false,
+        field: "is_exempt",
+      },
       remarks: {
         type: DataTypes.STRING(255),
         allowNull: true,

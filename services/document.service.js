@@ -2,6 +2,7 @@
 
 const examService = require("./exam.service");
 const feeService = require("./fee.service");
+const ApiError = require("../utils/ApiError");
 const { textPdf } = require("../utils/pdf");
 
 function dmcLines(dmc) {
@@ -36,4 +37,36 @@ async function receiptPdf(user, paymentId) {
   ].filter(Boolean));
 }
 
-module.exports = { dmcPdf, receiptPdf };
+function resultLines(title, data) {
+  return [
+    title,
+    [data.exam && data.exam.name, data.classLabel, data.subject].filter(Boolean).join(" · "),
+    ...data.rows.map((row) => {
+      const mark = row.obtained == null ? row.result : `${row.obtained}/${row.total}`;
+      return `${row.name}  ${mark}  ${row.percentage ?? "—"}%  ${row.grade || "—"}  ${row.result}  rank ${row.classRank ?? "—"}`;
+    }),
+  ];
+}
+
+async function examDocument(user, kind, examId, query) {
+  if (kind === "overall") {
+    const data = await examService.results(user, examId, {});
+    if (query.format === "pdf") return textPdf(resultLines("Overall examination report", data));
+    return data;
+  }
+  if (!query.classId) throw new ApiError(400, "Choose a class for this document.");
+  if (kind === "mark-sheet" && !query.subjectId) throw new ApiError(400, "Choose a subject for the mark sheet.");
+  const data = await examService.results(user, examId, {
+    classId: query.classId,
+    subjectId: kind === "mark-sheet" ? query.subjectId : undefined,
+  });
+  const titles = {
+    "result-sheet": "Result sheet",
+    "mark-sheet": "Mark sheet",
+    "class-report": "Class result report",
+  };
+  if (query.format === "pdf") return textPdf(resultLines(titles[kind] || "Examination document", data));
+  return data;
+}
+
+module.exports = { dmcPdf, receiptPdf, examDocument };

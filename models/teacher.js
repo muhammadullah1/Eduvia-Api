@@ -28,7 +28,7 @@ module.exports = (sequelize, DataTypes) => {
       },
       employeeCode: {
         type: DataTypes.STRING(50),
-        allowNull: false,
+        allowNull: true,
         field: "employee_code",
       },
       qualification: {

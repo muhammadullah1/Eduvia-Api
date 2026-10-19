@@ -18,7 +18,7 @@ const accessService = require("./access.service");
 const { today, weekdayOf, parse, iso } = require("../utils/dates");
 
 const profileInclude = [
-  { model: Users, as: "user", attributes: ["id", "firstName", "lastName", "email", "phone", "status"] },
+  { model: Users, as: "user", attributes: ["id", "firstName", "lastName", "email", "phone", "status", "photo"] },
   { model: Subjects, as: "subject", attributes: ["id", "name", "code"] },
   { model: Classes, as: "classes", through: { attributes: [] }, attributes: ["id", "label", "grade", "section"] },
 ];

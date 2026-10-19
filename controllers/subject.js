@@ -9,6 +9,7 @@ module.exports = {
       const data = await subjectService.list(req.user.schoolId, {
         archived,
         search: req.query.search,
+        classId: req.query.classId,
       });
       res.status(200).json({ success: true, message: "Subjects", data });
     } catch (err) {

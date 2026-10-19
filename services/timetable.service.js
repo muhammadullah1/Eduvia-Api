@@ -11,6 +11,7 @@ const {
 } = require("../models");
 const ApiError = require("../utils/ApiError");
 const accessService = require("./access.service");
+const classSubjectService = require("./class_subject.service");
 
 const SLOT_INCLUDE = [
   { model: Subjects, as: "subject", attributes: ["id", "name"] },
@@ -215,6 +216,7 @@ async function createMany(schoolId, data) {
     for (const day of days) {
       created.push(await TimetableSlots.create(rowValues(schoolId, resolved, day), { transaction }));
     }
+    await classSubjectService.ensureOffered(resolved.fkClassId, resolved.fkSubjectId, transaction);
     return created;
   });
 }
@@ -232,6 +234,8 @@ async function update(id, schoolId, data) {
       lock: transaction.LOCK.UPDATE,
     });
     if (!row) throw new ApiError(404, "Timetable slot not found");
+    const previousClassId = row.fkClassId;
+    const previousSubjectId = row.fkSubjectId;
     const merged = {
       fkClassId: data.fkClassId ?? row.fkClassId,
       day: data.day ?? row.day,
@@ -244,6 +248,10 @@ async function update(id, schoolId, data) {
     const resolved = await prepare(schoolId, merged);
     await assertFree(schoolId, resolved, [merged.day], row.id, transaction);
     await row.update(rowValues(schoolId, resolved, merged.day), { transaction });
+    await classSubjectService.ensureOffered(resolved.fkClassId, resolved.fkSubjectId, transaction);
+    if (previousClassId !== resolved.fkClassId || previousSubjectId !== resolved.fkSubjectId) {
+      await classSubjectService.pruneIfUnscheduled(previousClassId, previousSubjectId, transaction);
+    }
     return row;
   });
 }
@@ -251,7 +259,10 @@ async function update(id, schoolId, data) {
 async function remove(id, schoolId) {
   const row = await TimetableSlots.findOne({ where: { id, fkSchoolId: schoolId } });
   if (!row) throw new ApiError(404, "Timetable slot not found");
+  const classId = row.fkClassId;
+  const subjectId = row.fkSubjectId;
   await row.destroy();
+  await classSubjectService.pruneIfUnscheduled(classId, subjectId);
   return true;
 }
 

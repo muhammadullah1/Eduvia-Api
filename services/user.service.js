@@ -1,11 +1,13 @@
 "use strict";
 
+const crypto = require("crypto");
 const bcrypt = require("bcryptjs");
-const { Op } = require("sequelize");
+const { Op, UniqueConstraintError } = require("sequelize");
 const {
   Users,
   Teachers,
   Subjects,
+  Schools,
   TeacherSubjectAssignments,
   TeacherClasses,
   TimetableSlots,
@@ -13,6 +15,7 @@ const {
 } = require("../models");
 const { isValidPhonePk, normalizePhonePk } = require("../utils/pakistan");
 const authService = require("./auth.service");
+const r2Service = require("./r2.service");
 const { today } = require("../utils/dates");
 const { USER_ROLES, USER_STATUS } = require("../constants");
 const ApiError = require("../utils/ApiError");
@@ -38,10 +41,25 @@ async function findByEmail(email, options = {}) {
   });
 }
 
-async function getByEmailWithPassword(email) {
-  const rows = await Users.findAll({ where: { email } });
+async function getByEmailWithPassword(email, schoolId) {
+  const rows = await Users.findAll({
+    where: { email },
+    include: [{ model: Schools, as: "school", attributes: ["id", "name"] }],
+  });
+  if (schoolId) {
+    return rows.find((row) => Number(row.fkSchoolId) === Number(schoolId)) || null;
+  }
   if (rows.length > 1) {
-    throw new ApiError(409, "This email is registered at more than one school");
+    throw new ApiError(
+      409,
+      "This email is registered at more than one school. Choose your school to continue.",
+      {
+        schools: rows.map((row) => ({
+          id: row.fkSchoolId,
+          name: row.school?.name || `School ${row.fkSchoolId}`,
+        })),
+      },
+    );
   }
   return rows[0] || null;
 }
@@ -123,9 +141,16 @@ async function createStaffUser(actor, payload) {
     }
   }
 
-  const hashed = await bcrypt.hash(password, await bcrypt.genSalt(10));
+  const code = employeeCode ? String(employeeCode).trim() : "";
+  const secret = password && String(password).length >= 8
+    ? String(password)
+    : crypto.randomBytes(32).toString("hex");
+  const hashed = await bcrypt.hash(secret, await bcrypt.genSalt(10));
 
-  const { json, user } = await sequelize.transaction(async (t) => {
+  let json;
+  let user;
+  try {
+    ({ json, user } = await sequelize.transaction(async (t) => {
     const user = await Users.create(
       {
         fkSchoolId: schoolId,
@@ -144,7 +169,7 @@ async function createStaffUser(actor, payload) {
 
     if (role === USER_ROLES.TEACHER) {
       const teacher = await Teachers.create(
-        { fkUserId: user.id, fkSchoolId: schoolId, employeeCode: employeeCode || null, fkSubjectId: subjectId },
+        { fkUserId: user.id, fkSchoolId: schoolId, employeeCode: code || null, fkSubjectId: subjectId },
         { transaction: t },
       );
       await TeacherSubjectAssignments.create(
@@ -163,12 +188,25 @@ async function createStaffUser(actor, payload) {
     const json = user.toJSON();
     delete json.password;
     return { json, user };
-  });
-
-  try {
-    await authService.sendUserInvitation(user, role);
+    }));
   } catch (err) {
-    console.error("Failed to send staff invitation email:", err.message);
+    if (err instanceof UniqueConstraintError) {
+      const constraint = err.parent?.constraint || "";
+      if (constraint.includes("employee")) {
+        throw new ApiError(409, "That employee code is already used at this school.");
+      }
+    }
+    throw err;
+  }
+
+  const school = await Schools.findByPk(schoolId, { attributes: ["name"] });
+  try {
+    await authService.sendUserInvitation(user, role, school?.name);
+  } catch (err) {
+    throw new ApiError(
+      502,
+      "The staff account was created, but the invitation email could not be sent. Open the staff profile and resend the invitation.",
+    );
   }
 
   return json;
@@ -277,6 +315,24 @@ async function restoreStaffUser(actor, userId) {
   return json;
 }
 
+const PHOTO_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
+const PHOTO_MAX_BYTES = 2 * 1024 * 1024;
+
+async function presignStaffPhoto(actor, { contentType, fileName }) {
+  const type = String(contentType || "");
+  const ext = type === "image/png" ? "png" : type === "image/webp" ? "webp" : "jpg";
+  const safeName = String(fileName || "photo")
+    .replace(/[^a-zA-Z0-9._-]/g, "")
+    .slice(0, 40);
+  const key = `schools/${actor.schoolId}/staff-photos/${crypto.randomUUID()}-${safeName || "photo"}.${ext}`;
+  return r2Service.createPresignedUpload({
+    key,
+    contentType: type,
+    allowedTypes: PHOTO_TYPES,
+    maxBytes: PHOTO_MAX_BYTES,
+  });
+}
+
 async function resendInvitation(actor, userId) {
   const user = await Users.findOne({
     where: { id: userId, fkSchoolId: actor.schoolId },
@@ -301,6 +357,7 @@ module.exports = {
   update,
   listBySchool,
   createStaffUser,
+  presignStaffPhoto,
   updateStaffUser,
   removeStaffUser,
   restoreStaffUser,

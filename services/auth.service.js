@@ -25,8 +25,11 @@ async function findUserForAuth(userId) {
   });
 }
 
-async function signIn(email, password) {
-  const user = await userService.getByEmailWithPassword(email);
+async function signIn(email, password, schoolId) {
+  const user = await userService.getByEmailWithPassword(
+    String(email).trim().toLowerCase(),
+    schoolId,
+  );
   if (!user || !user.password) {
     throw new ApiError(400, "Invalid email or password");
   }
@@ -196,7 +199,7 @@ async function resetPassword(token, newPassword) {
   };
 }
 
-async function sendUserInvitation(user, role) {
+async function sendUserInvitation(user, role, schoolName) {
   const secret = getInviteSecret(user);
   const token = jwt.sign(
     { id: user.id, email: user.email, purpose: "invitation" },
@@ -212,7 +215,7 @@ async function sendUserInvitation(user, role) {
     name: `${user.firstName || ""} ${user.lastName || ""}`.trim() || user.email,
     role: role || user.role,
     inviteUrl,
-    schoolName: "Creative Leaders School",
+    schoolName: schoolName || "Eduvia",
     expiresIn: "7 days",
   });
 
