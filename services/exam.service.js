@@ -94,6 +94,84 @@ function assertDates(startDate, endDate) {
   }
 }
 
+function assertPaper(totalMarks, passingMarks, label) {
+  const total = Number(totalMarks);
+  const passing = Number(passingMarks);
+  if (!Number.isFinite(total) || total <= 0 || total > 1000) {
+    throw new ApiError(400, `${label}: paper marks must be between 1 and 1000.`);
+  }
+  if (!Number.isFinite(passing) || passing < 0 || passing > total) {
+    throw new ApiError(400, `${label}: passing marks must be between 0 and that paper’s marks.`);
+  }
+  return { total, passing };
+}
+
+async function papersForClasses(actor, classIds) {
+  const ids = [...new Set(classIds.map(Number))].filter((id) => Number.isInteger(id) && id > 0);
+  if (!ids.length) throw new ApiError(400, "Select at least one class.");
+  const classes = await Classes.findAll({
+    where: { id: ids, fkSchoolId: actor.schoolId },
+    order: [["grade", "ASC"], ["section", "ASC"]],
+  });
+  if (classes.length !== ids.length) throw new ApiError(400, "One of those classes is not in this school.");
+  const rows = [];
+  for (const klass of classes) {
+    const subjects = await classSubjectService.listOffered(actor.schoolId, klass.id);
+    rows.push({
+      classId: klass.id,
+      label: classLabel(klass),
+      subjects: subjects.map((subject) => ({
+        id: subject.id,
+        name: subject.name,
+        totalMarks: 100,
+        passingMarks: 40,
+      })),
+    });
+  }
+  return rows;
+}
+
+async function planPapers(actor, sessionId, papers) {
+  if (!Array.isArray(papers) || !papers.length) {
+    throw new ApiError(400, "Enter paper marks for each subject.");
+  }
+  const classIds = [...new Set(papers.map((paper) => Number(paper.classId)))];
+  const classes = await Classes.findAll({
+    where: { id: classIds, fkSchoolId: actor.schoolId, fkSessionId: sessionId },
+  });
+  if (classes.length !== classIds.length) {
+    throw new ApiError(400, "Every class must belong to the selected session.");
+  }
+  const incoming = new Map();
+  for (const paper of papers) {
+    const key = Number(paper.classId);
+    const list = incoming.get(key) || [];
+    list.push(paper);
+    incoming.set(key, list);
+  }
+  const plan = [];
+  for (const klass of classes) {
+    const offered = await classSubjectService.listOffered(actor.schoolId, klass.id);
+    if (!offered.length) {
+      throw new ApiError(400, `${classLabel(klass)} has no subjects assigned. Assign subjects before scheduling this exam.`);
+    }
+    const bySubject = new Map((incoming.get(klass.id) || []).map((paper) => [Number(paper.subjectId), paper]));
+    const subjects = [];
+    for (const subject of offered) {
+      const paper = bySubject.get(subject.id);
+      if (!paper) {
+        throw new ApiError(400, `Enter paper marks for ${subject.name} in ${classLabel(klass)}.`);
+      }
+      subjects.push({
+        subject,
+        marks: assertPaper(paper.totalMarks, paper.passingMarks, `${classLabel(klass)} · ${subject.name}`),
+      });
+    }
+    plan.push({ klass, subjects });
+  }
+  return plan;
+}
+
 /**
  * Exams and results (UR-07, BR-09/10). Publication is a property of the mark
  * sheet; whether a parent can see it is decided at read time from the
@@ -185,7 +263,51 @@ async function createSheetForClass(actor, exam, klass, subjectId, marks, transac
   return sheet;
 }
 
+async function createFromPapers(actor, body) {
+  const name = String(body.name || "").trim();
+  if (!name) throw new ApiError(400, "Exam name is required.");
+  if (!EXAM_TYPES.includes(body.examType)) throw new ApiError(400, "Choose an exam type.");
+  assertDates(body.startDate, body.endDate);
+  if (!body.startDate || !body.endDate) throw new ApiError(400, "Start and end dates are required.");
+  const session = await AcademicSessions.findOne({
+    where: { id: body.sessionId, fkSchoolId: actor.schoolId },
+  });
+  if (!session) throw new ApiError(404, "Academic session not found");
+  const plan = await planPapers(actor, session.id, body.papers);
+  const sample = plan[0].subjects[0].marks;
+  const examId = await sequelize.transaction(async (transaction) => {
+    const exam = await Exams.create(
+      {
+        fkSchoolId: actor.schoolId,
+        fkClassId: plan[0].klass.id,
+        fkSessionId: session.id,
+        name,
+        examType: body.examType,
+        totalMarks: sample.total,
+        passingMarks: sample.passing,
+        startDate: body.startDate,
+        endDate: body.endDate,
+        feeMonth: String(body.endDate).slice(0, 7),
+        status: "Scheduled",
+      },
+      { transaction },
+    );
+    for (const item of plan) {
+      await ExamClasses.create({ fkExamId: exam.id, fkClassId: item.klass.id }, { transaction });
+      for (const paper of item.subjects) {
+        await createSheetForClass(actor, exam, item.klass, paper.subject.id, paper.marks, transaction);
+      }
+    }
+    return exam.id;
+  }).catch((err) => {
+    if (err instanceof UniqueConstraintError) throw new ApiError(409, "An exam with this name already exists in the session.");
+    throw err;
+  });
+  return getExam(actor, examId);
+}
+
 async function create(actor, body) {
+  if (Array.isArray(body.papers)) return createFromPapers(actor, body);
   if (Array.isArray(body.classIds)) return createAcrossClasses(actor, body);
   const { classId, name, feeMonth, sessionId, subjects, startDate, endDate, examType, totalMarks, passingMarks } = body;
   const klass = await Classes.findOne({ where: { id: classId, fkSchoolId: actor.schoolId } });
@@ -639,6 +761,9 @@ async function updateExam(actor, id, body) {
   if ((exam.markSheets || []).some((sheet) => sheet.status !== SHEET_STATUS.DRAFT)) {
     throw new ApiError(400, "Submitted mark sheets must be reopened before the exam can be edited.");
   }
+  if (body.sessionId != null && Number(body.sessionId) !== Number(exam.fkSessionId)) {
+    throw new ApiError(400, "The session at the top of the portal is not the session this exam was scheduled in.");
+  }
   const name = body.name != null ? String(body.name).trim() : exam.name;
   if (!name) throw new ApiError(400, "Exam name is required.");
   const examType = body.examType || exam.examType;
@@ -646,28 +771,53 @@ async function updateExam(actor, id, body) {
   const startDate = body.startDate !== undefined ? body.startDate : exam.startDate;
   const endDate = body.endDate !== undefined ? body.endDate : exam.endDate;
   assertDates(startDate, endDate);
-  const marks = assertMarks(
-    body.totalMarks != null ? body.totalMarks : exam.totalMarks,
-    body.passingMarks != null ? body.passingMarks : exam.passingMarks,
-  );
-  const nextClassIds = Array.isArray(body.classIds)
-    ? [...new Set(body.classIds.map(Number))]
-    : null;
+  const usingPapers = Array.isArray(body.papers);
+  const marks = usingPapers
+    ? null
+    : assertMarks(
+      body.totalMarks != null ? body.totalMarks : exam.totalMarks,
+      body.passingMarks != null ? body.passingMarks : exam.passingMarks,
+    );
+  const plan = usingPapers ? await planPapers(actor, exam.fkSessionId, body.papers) : null;
+  const nextClassIds = plan
+    ? plan.map((item) => item.klass.id)
+    : Array.isArray(body.classIds)
+      ? [...new Set(body.classIds.map(Number))]
+      : null;
   await sequelize.transaction(async (transaction) => {
+    const sample = plan ? plan[0].subjects[0].marks : marks;
     await exam.update(
       {
         name,
         examType,
         startDate: startDate || null,
         endDate: endDate || null,
-        totalMarks: marks.total,
-        passingMarks: marks.passing,
+        totalMarks: sample.total,
+        passingMarks: sample.passing,
         feeMonth: endDate ? String(endDate).slice(0, 7) : exam.feeMonth,
       },
       { transaction },
     );
-    for (const sheet of exam.markSheets) {
-      await sheet.update({ maxScore: marks.total, passPercent: marks.passing }, { transaction });
+    if (plan) {
+      const wanted = new Map();
+      for (const item of plan) {
+        for (const paper of item.subjects) wanted.set(`${item.klass.id}:${paper.subject.id}`, paper);
+      }
+      for (const sheet of exam.markSheets) {
+        const paper = wanted.get(`${sheet.fkClassId}:${sheet.fkSubjectId}`);
+        if (!paper) continue;
+        const tooHigh = (sheet.rows || []).some(
+          (row) => row.score != null && Number(row.score) > paper.marks.total,
+        );
+        if (tooHigh) {
+          throw new ApiError(400, "A saved mark is higher than the new paper total. Lower that mark first.");
+        }
+        await sheet.update({ maxScore: paper.marks.total, passPercent: paper.marks.passing }, { transaction });
+      }
+    } else {
+      for (const sheet of exam.markSheets) {
+        await sheet.update({ maxScore: marks.total, passPercent: marks.passing }, { transaction });
+      }
     }
     if (nextClassIds) {
       if (!nextClassIds.length) throw new ApiError(400, "Select at least one class.");
@@ -680,8 +830,10 @@ async function updateExam(actor, id, body) {
       }
       const currentIds = new Set((exam.markSheets || []).map((sheet) => sheet.fkClassId));
       for (const klass of classes) {
-        if (currentIds.has(klass.id)) continue;
-        const subjectIds = await classSubjectService.offeredSubjectIds(actor.schoolId, klass.id);
+        const item = plan ? plan.find((entry) => entry.klass.id === klass.id) : null;
+        const subjectIds = item
+          ? item.subjects.map((paper) => paper.subject.id)
+          : await classSubjectService.offeredSubjectIds(actor.schoolId, klass.id);
         if (!subjectIds.length) {
           throw new ApiError(400, `${classLabel(klass)} has no subjects assigned.`);
         }
@@ -691,7 +843,14 @@ async function updateExam(actor, id, body) {
           transaction,
         });
         for (const subjectId of subjectIds) {
-          await createSheetForClass(actor, exam, klass, subjectId, marks, transaction);
+          const exists = exam.markSheets.some(
+            (sheet) => sheet.fkClassId === klass.id && sheet.fkSubjectId === subjectId,
+          );
+          if (exists) continue;
+          const paperMarks = item
+            ? item.subjects.find((paper) => paper.subject.id === subjectId).marks
+            : marks;
+          await createSheetForClass(actor, exam, klass, subjectId, paperMarks, transaction);
         }
       }
       const removeIds = [...currentIds].filter((classId) => !nextClassIds.includes(classId));
@@ -706,6 +865,20 @@ async function updateExam(actor, id, body) {
         }
         await ExamClasses.destroy({ where: { fkExamId: exam.id, fkClassId: classId }, transaction });
       }
+      if (plan) {
+        const keep = new Set();
+        for (const item of plan) {
+          for (const paper of item.subjects) keep.add(`${item.klass.id}:${paper.subject.id}`);
+        }
+        for (const sheet of exam.markSheets) {
+          if (!nextClassIds.includes(sheet.fkClassId) || keep.has(`${sheet.fkClassId}:${sheet.fkSubjectId}`)) continue;
+          if ((sheet.rows || []).some((row) => row.score != null || row.isAbsent || row.isExempt)) {
+            throw new ApiError(400, "A subject with entered marks cannot be removed.");
+          }
+          await MarkSheetRows.destroy({ where: { fkMarkSheetId: sheet.id }, transaction });
+          await sheet.destroy({ transaction });
+        }
+      }
       await exam.update({ fkClassId: nextClassIds[0] }, { transaction });
     }
     await syncExamStatus(exam.id, transaction);
@@ -714,6 +887,22 @@ async function updateExam(actor, id, body) {
     throw err;
   });
   return getExam(actor, exam.id);
+}
+
+async function removeExam(actor, id) {
+  const exam = await Exams.findOne({
+    where: { id, fkSchoolId: actor.schoolId },
+    include: [{ model: MarkSheets, as: "markSheets" }],
+  });
+  if (!exam) throw new ApiError(404, "Exam not found");
+  if (["Published", "Finalised", "Archived"].includes(exam.status)) {
+    throw new ApiError(400, "A finalised or published exam cannot be deleted.");
+  }
+  if ((exam.markSheets || []).some((sheet) => sheet.status !== SHEET_STATUS.DRAFT)) {
+    throw new ApiError(400, "Reopen submitted mark sheets before deleting this exam.");
+  }
+  await exam.destroy();
+  return { id: Number(id) };
 }
 
 function rankValue(items, scoreOf, tie) {
@@ -898,8 +1087,10 @@ async function grantBulkOverrides(actor, examId, { classId, reason }) {
 module.exports = {
   list,
   listSummaries,
+  papersForClasses,
   create,
   updateExam,
+  removeExam,
   getExam,
   getSheet,
   updateRows,

@@ -12,8 +12,26 @@ module.exports = {
   validateId: idParam,
   validateSheet: sheetParam,
   validateList: { query: Joi.object({ classId: id, sessionId: id, view: Joi.string().valid("summary") }) },
+  validatePapers: {
+    query: Joi.object({
+      classIds: Joi.string().pattern(/^\d+(,\d+)*$/).required(),
+    }),
+  },
   validateCreate: {
     body: Joi.alternatives().try(
+      Joi.object({
+        papers: Joi.array().items(Joi.object({
+          classId: id.required(),
+          subjectId: id.required(),
+          totalMarks: Joi.number().positive().max(1000).required(),
+          passingMarks: Joi.number().min(0).max(1000).required(),
+        })).min(1).required(),
+        name: Joi.string().max(100).required(),
+        examType: examType.required(),
+        sessionId: id.required(),
+        startDate: isoDate.required(),
+        endDate: isoDate.required(),
+      }),
       Joi.object({
         classIds: Joi.array().items(id).min(1).required(),
         name: Joi.string().max(100).required(),
@@ -46,11 +64,18 @@ module.exports = {
     body: Joi.object({
       name: Joi.string().max(100),
       examType,
+      sessionId: id,
       startDate: isoDate.allow(null),
       endDate: isoDate.allow(null),
       totalMarks: Joi.number().positive().max(1000),
       passingMarks: Joi.number().min(0).max(1000),
       classIds: Joi.array().items(id).min(1),
+      papers: Joi.array().items(Joi.object({
+        classId: id.required(),
+        subjectId: id.required(),
+        totalMarks: Joi.number().positive().max(1000).required(),
+        passingMarks: Joi.number().min(0).max(1000).required(),
+      })).min(1),
     }).min(1),
   },
   validateRows: {
