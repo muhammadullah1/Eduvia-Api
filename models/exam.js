@@ -35,18 +35,6 @@ module.exports = (sequelize, DataTypes) => {
         defaultValue: "Mid-Term",
         field: "exam_type",
       },
-      totalMarks: {
-        type: DataTypes.DECIMAL(5, 2),
-        allowNull: false,
-        defaultValue: 100,
-        field: "total_marks",
-      },
-      passingMarks: {
-        type: DataTypes.DECIMAL(5, 2),
-        allowNull: false,
-        defaultValue: 40,
-        field: "passing_marks",
-      },
       startDate: {
         type: DataTypes.DATEONLY,
         allowNull: true,

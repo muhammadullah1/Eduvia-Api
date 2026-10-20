@@ -3,6 +3,7 @@
 const { Op } = require("sequelize");
 const { Classes, Students, TimetableSlots } = require("../models");
 const ApiError = require("../utils/ApiError");
+const { sortClasses } = require("../utils/class_order");
 
 function isArchivedClass(row) {
   if (!row) return false;
@@ -88,16 +89,12 @@ async function list(schoolId, { sessionId, includeStats, archived } = {}) {
     const rows = await Classes.findAll({
       where,
       paranoid: false,
-      order: [["grade", "ASC"], ["section", "ASC"]],
     });
-    if (!includeStats) return rows;
-    return attachStats(rows);
+    if (!includeStats) return sortClasses(rows);
+    return attachStats(sortClasses(rows));
   }
 
-  const rows = await Classes.findAll({
-    where,
-    order: [["grade", "ASC"], ["section", "ASC"]],
-  });
+  const rows = sortClasses(await Classes.findAll({ where }));
   if (!includeStats) return rows;
   return attachStats(rows);
 }

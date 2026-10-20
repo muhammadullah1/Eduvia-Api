@@ -343,10 +343,12 @@ describe("schema-aligned critical flows", () => {
       status: "Active",
     });
     const exam = await examService.create(fx.actor, {
-      classId: fx.klass.id,
       name: "Midterm",
-      feeMonth: "2026-10",
-      subjects: [{ subjectId: fx.subject.id, maxScore: 100 }],
+      examType: "Mid-Term",
+      sessionId: fx.session.id,
+      startDate: "2026-10-05",
+      endDate: "2026-10-09",
+      papers: [{ classId: fx.klass.id, subjectId: fx.subject.id, totalMarks: 100, passingMarks: 40 }],
     });
     const sheet = exam.markSheets[0];
     await examService.updateRows(fx.actor, sheet.id, [{ studentId: student.id, score: 80 }]);

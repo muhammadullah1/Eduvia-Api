@@ -3,6 +3,7 @@
 const {
   Exams,
   ExamClasses,
+  ClassSubjects,
   MarkSheets,
   MarkSheetRows,
   ResultVisibilityOverrides,
@@ -14,7 +15,7 @@ const {
   Users,
   sequelize,
 } = require("../models");
-const { USER_ROLES, SHEET_STATUS, RESULT_FEE_RULES, SETTING_KEYS, STUDENT_STATUS, GRADE_BANDS } = require("../constants");
+const { USER_ROLES, SHEET_STATUS, RESULT_FEE_RULES, SETTING_KEYS, STUDENT_STATUS, GRADE_BANDS, FAIL_GRADE } = require("../constants");
 const ApiError = require("../utils/ApiError");
 const accessService = require("./access.service");
 const auditService = require("./audit.service");
@@ -23,6 +24,7 @@ const feeService = require("./fee.service");
 const { Op, UniqueConstraintError } = require("sequelize");
 const { today, monthKey } = require("../utils/dates");
 const classSubjectService = require("./class_subject.service");
+const { sortClasses } = require("../utils/class_order");
 
 const EXAM_TYPES = ["Mid-Term", "Monthly Test", "Final Term", "Unit Test"];
 
@@ -76,69 +78,83 @@ async function syncExamStatus(examId, transaction) {
   return exam;
 }
 
-function assertMarks(totalMarks, passingMarks) {
-  const total = Number(totalMarks);
-  const passing = Number(passingMarks);
-  if (!Number.isFinite(total) || total <= 0 || total > 1000) {
-    throw new ApiError(400, "Total marks must be between 1 and 1000.");
-  }
-  if (!Number.isFinite(passing) || passing < 0 || passing > total) {
-    throw new ApiError(400, "Passing marks must be between 0 and the total marks.");
-  }
-  return { total, passing };
-}
-
 function assertDates(startDate, endDate) {
   if (startDate && endDate && endDate < startDate) {
     throw new ApiError(400, "The end date cannot be before the start date.");
   }
 }
 
-function assertPaper(totalMarks, passingMarks, label) {
-  const total = Number(totalMarks);
-  const passing = Number(passingMarks);
+const TIME = /^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/;
+
+function normaliseTime(value, label) {
+  if (value == null || value === "") return null;
+  if (!TIME.test(String(value))) throw new ApiError(400, `${label}: use a 24-hour time like 09:00.`);
+  return String(value).slice(0, 5);
+}
+
+/** Validate one paper's marks and schedule against the exam window. */
+function assertPaper(paper, label, window) {
+  const total = Number(paper.totalMarks);
+  const passing = Number(paper.passingMarks);
   if (!Number.isFinite(total) || total <= 0 || total > 1000) {
     throw new ApiError(400, `${label}: paper marks must be between 1 and 1000.`);
   }
   if (!Number.isFinite(passing) || passing < 0 || passing > total) {
     throw new ApiError(400, `${label}: passing marks must be between 0 and that paper’s marks.`);
   }
-  return { total, passing };
+  const paperDate = paper.paperDate || null;
+  if (paperDate && window.startDate && window.endDate && (paperDate < window.startDate || paperDate > window.endDate)) {
+    throw new ApiError(400, `${label}: the paper date must fall between the exam’s start and end dates.`);
+  }
+  const startTime = normaliseTime(paper.startTime, label);
+  const endTime = normaliseTime(paper.endTime, label);
+  if (startTime && endTime && endTime <= startTime) {
+    throw new ApiError(400, `${label}: the paper must end after it starts.`);
+  }
+  return { total, passing, paperDate, startTime, endTime };
 }
 
+async function classDefaults(classId) {
+  const links = await ClassSubjects.findAll({ where: { fkClassId: classId } });
+  return new Map(
+    links.map((link) => [
+      Number(link.fkSubjectId),
+      { totalMarks: Number(link.defaultTotalMarks), passingMarks: Number(link.defaultPassingMarks) },
+    ]),
+  );
+}
+
+/** Subjects each class sits, with the class's default paper marks. */
 async function papersForClasses(actor, classIds) {
   const ids = [...new Set(classIds.map(Number))].filter((id) => Number.isInteger(id) && id > 0);
   if (!ids.length) throw new ApiError(400, "Select at least one class.");
-  const classes = await Classes.findAll({
-    where: { id: ids, fkSchoolId: actor.schoolId },
-    order: [["grade", "ASC"], ["section", "ASC"]],
-  });
+  const classes = sortClasses(await Classes.findAll({ where: { id: ids, fkSchoolId: actor.schoolId } }));
   if (classes.length !== ids.length) throw new ApiError(400, "One of those classes is not in this school.");
   const rows = [];
   for (const klass of classes) {
     const subjects = await classSubjectService.listOffered(actor.schoolId, klass.id);
+    const defaults = await classDefaults(klass.id);
     rows.push({
       classId: klass.id,
       label: classLabel(klass),
       subjects: subjects.map((subject) => ({
         id: subject.id,
         name: subject.name,
-        totalMarks: 100,
-        passingMarks: 40,
+        ...(defaults.get(subject.id) || { totalMarks: 100, passingMarks: 40 }),
       })),
     });
   }
   return rows;
 }
 
-async function planPapers(actor, sessionId, papers) {
+async function planPapers(actor, sessionId, papers, window) {
   if (!Array.isArray(papers) || !papers.length) {
     throw new ApiError(400, "Enter paper marks for each subject.");
   }
   const classIds = [...new Set(papers.map((paper) => Number(paper.classId)))];
-  const classes = await Classes.findAll({
+  const classes = sortClasses(await Classes.findAll({
     where: { id: classIds, fkSchoolId: actor.schoolId, fkSessionId: sessionId },
-  });
+  }));
   if (classes.length !== classIds.length) {
     throw new ApiError(400, "Every class must belong to the selected session.");
   }
@@ -162,14 +178,38 @@ async function planPapers(actor, sessionId, papers) {
       if (!paper) {
         throw new ApiError(400, `Enter paper marks for ${subject.name} in ${classLabel(klass)}.`);
       }
-      subjects.push({
-        subject,
-        marks: assertPaper(paper.totalMarks, paper.passingMarks, `${classLabel(klass)} · ${subject.name}`),
-      });
+      subjects.push({ subject, marks: assertPaper(paper, `${classLabel(klass)} · ${subject.name}`, window) });
     }
     plan.push({ klass, subjects });
   }
   return plan;
+}
+
+/** Remember the marks just used as each class's defaults for the next exam. */
+async function rememberDefaults(plan, transaction) {
+  for (const item of plan) {
+    for (const paper of item.subjects) {
+      const [link] = await ClassSubjects.findOrCreate({
+        where: { fkClassId: item.klass.id, fkSubjectId: paper.subject.id },
+        defaults: { periodsPerWeek: 5, isElective: false },
+        transaction,
+      });
+      await link.update(
+        { defaultTotalMarks: paper.marks.total, defaultPassingMarks: paper.marks.passing },
+        { transaction },
+      );
+    }
+  }
+}
+
+function paperFields(marks) {
+  return {
+    totalMarks: marks.total,
+    passingMarks: marks.passing,
+    paperDate: marks.paperDate,
+    startTime: marks.startTime,
+    endTime: marks.endTime,
+  };
 }
 
 /**
@@ -248,8 +288,7 @@ async function createSheetForClass(actor, exam, klass, subjectId, marks, transac
       fkClassId: klass.id,
       fkSubjectId: subject.id,
       fkTeacherId: slot ? slot.fkTeacherId : null,
-      maxScore: marks.total,
-      passPercent: marks.passing,
+      ...paperFields(marks),
       status: SHEET_STATUS.DRAFT,
     },
     { transaction },
@@ -263,18 +302,23 @@ async function createSheetForClass(actor, exam, klass, subjectId, marks, transac
   return sheet;
 }
 
-async function createFromPapers(actor, body) {
+function uniqueName(err) {
+  if (err instanceof UniqueConstraintError) throw new ApiError(409, "An exam with this name already exists in the session.");
+  throw err;
+}
+
+/** Create an exam from per-class subject papers (total, passing, date, time). */
+async function create(actor, body) {
   const name = String(body.name || "").trim();
   if (!name) throw new ApiError(400, "Exam name is required.");
   if (!EXAM_TYPES.includes(body.examType)) throw new ApiError(400, "Choose an exam type.");
-  assertDates(body.startDate, body.endDate);
   if (!body.startDate || !body.endDate) throw new ApiError(400, "Start and end dates are required.");
+  assertDates(body.startDate, body.endDate);
   const session = await AcademicSessions.findOne({
     where: { id: body.sessionId, fkSchoolId: actor.schoolId },
   });
   if (!session) throw new ApiError(404, "Academic session not found");
-  const plan = await planPapers(actor, session.id, body.papers);
-  const sample = plan[0].subjects[0].marks;
+  const plan = await planPapers(actor, session.id, body.papers, body);
   const examId = await sequelize.transaction(async (transaction) => {
     const exam = await Exams.create(
       {
@@ -283,8 +327,6 @@ async function createFromPapers(actor, body) {
         fkSessionId: session.id,
         name,
         examType: body.examType,
-        totalMarks: sample.total,
-        passingMarks: sample.passing,
         startDate: body.startDate,
         endDate: body.endDate,
         feeMonth: String(body.endDate).slice(0, 7),
@@ -298,117 +340,9 @@ async function createFromPapers(actor, body) {
         await createSheetForClass(actor, exam, item.klass, paper.subject.id, paper.marks, transaction);
       }
     }
+    if (body.rememberDefaults !== false) await rememberDefaults(plan, transaction);
     return exam.id;
-  }).catch((err) => {
-    if (err instanceof UniqueConstraintError) throw new ApiError(409, "An exam with this name already exists in the session.");
-    throw err;
-  });
-  return getExam(actor, examId);
-}
-
-async function create(actor, body) {
-  if (Array.isArray(body.papers)) return createFromPapers(actor, body);
-  if (Array.isArray(body.classIds)) return createAcrossClasses(actor, body);
-  const { classId, name, feeMonth, sessionId, subjects, startDate, endDate, examType, totalMarks, passingMarks } = body;
-  const klass = await Classes.findOne({ where: { id: classId, fkSchoolId: actor.schoolId } });
-  if (!klass) throw new ApiError(404, "Class not found");
-  assertDates(startDate, endDate);
-  const marks = assertMarks(totalMarks || (subjects[0] && subjects[0].maxScore) || 100, passingMarks ?? 40);
-  const examId = await sequelize.transaction(async (transaction) => {
-    const exam = await Exams.create(
-      {
-        fkSchoolId: actor.schoolId,
-        fkClassId: klass.id,
-        fkSessionId: sessionId || klass.fkSessionId,
-        name,
-        examType: EXAM_TYPES.includes(examType) ? examType : "Mid-Term",
-        totalMarks: marks.total,
-        passingMarks: marks.passing,
-        startDate: startDate || null,
-        endDate: endDate || null,
-        feeMonth: feeMonth || (endDate ? String(endDate).slice(0, 7) : null),
-        status: startDate ? "Scheduled" : "Draft",
-      },
-      { transaction },
-    );
-    await ExamClasses.findOrCreate({
-      where: { fkExamId: exam.id, fkClassId: klass.id },
-      defaults: { fkExamId: exam.id, fkClassId: klass.id },
-      transaction,
-    });
-    for (const item of subjects) {
-      await createSheetForClass(
-        actor,
-        exam,
-        klass,
-        item.subjectId,
-        { total: item.maxScore || marks.total, passing: marks.passing },
-        transaction,
-      );
-    }
-    return exam.id;
-  }).catch((err) => {
-    if (err instanceof UniqueConstraintError) throw new ApiError(409, "An exam with this name already exists in the session.");
-    throw err;
-  });
-  return getExam(actor, examId);
-}
-
-async function createAcrossClasses(actor, body) {
-  const classIds = [...new Set((body.classIds || []).map(Number))];
-  if (!classIds.length) throw new ApiError(400, "Select at least one class.");
-  const name = String(body.name || "").trim();
-  if (!name) throw new ApiError(400, "Exam name is required.");
-  if (!EXAM_TYPES.includes(body.examType)) throw new ApiError(400, "Choose an exam type.");
-  assertDates(body.startDate, body.endDate);
-  if (!body.startDate || !body.endDate) throw new ApiError(400, "Start and end dates are required.");
-  const marks = assertMarks(body.totalMarks, body.passingMarks);
-  const session = await AcademicSessions.findOne({
-    where: { id: body.sessionId, fkSchoolId: actor.schoolId },
-  });
-  if (!session) throw new ApiError(404, "Academic session not found");
-  const classes = await Classes.findAll({
-    where: { id: classIds, fkSchoolId: actor.schoolId, fkSessionId: session.id },
-  });
-  if (classes.length !== classIds.length) {
-    throw new ApiError(400, "Every class must belong to the selected session.");
-  }
-  const plan = [];
-  for (const klass of classes) {
-    const subjectIds = await classSubjectService.offeredSubjectIds(actor.schoolId, klass.id);
-    if (!subjectIds.length) {
-      throw new ApiError(400, `${classLabel(klass)} has no subjects assigned. Assign subjects before scheduling this exam.`);
-    }
-    plan.push({ klass, subjectIds });
-  }
-  const examId = await sequelize.transaction(async (transaction) => {
-    const exam = await Exams.create(
-      {
-        fkSchoolId: actor.schoolId,
-        fkClassId: classes[0].id,
-        fkSessionId: session.id,
-        name,
-        examType: body.examType,
-        totalMarks: marks.total,
-        passingMarks: marks.passing,
-        startDate: body.startDate,
-        endDate: body.endDate,
-        feeMonth: String(body.endDate).slice(0, 7),
-        status: "Scheduled",
-      },
-      { transaction },
-    );
-    for (const item of plan) {
-      await ExamClasses.create({ fkExamId: exam.id, fkClassId: item.klass.id }, { transaction });
-      for (const subjectId of item.subjectIds) {
-        await createSheetForClass(actor, exam, item.klass, subjectId, marks, transaction);
-      }
-    }
-    return exam.id;
-  }).catch((err) => {
-    if (err instanceof UniqueConstraintError) throw new ApiError(409, "An exam with this name already exists in the session.");
-    throw err;
-  });
+  }).catch(uniqueName);
   return getExam(actor, examId);
 }
 
@@ -418,13 +352,35 @@ async function getExam(user, id) {
   return exam;
 }
 
+/**
+ * Students admitted after the exam was scheduled have no row yet. While the
+ * sheet is still a draft, add a blank row for every active student missing one.
+ */
+async function addMissingRows(sheet) {
+  if (sheet.status !== SHEET_STATUS.DRAFT) return false;
+  const present = new Set(sheet.rows.map((row) => row.fkStudentId));
+  const students = await Students.findAll({
+    where: { fkClassId: sheet.fkClassId, status: STUDENT_STATUS.ACTIVE },
+    attributes: ["id"],
+  });
+  const missing = students.filter((student) => !present.has(student.id));
+  if (!missing.length) return false;
+  await MarkSheetRows.bulkCreate(
+    missing.map((student) => ({ fkMarkSheetId: sheet.id, fkStudentId: student.id, score: null })),
+    { ignoreDuplicates: true },
+  );
+  return true;
+}
+
 async function getSheet(user, id) {
-  const sheet = await MarkSheets.findOne({ where: { id, fkSchoolId: user.schoolId }, include: sheetInclude });
+  const find = () => MarkSheets.findOne({ where: { id, fkSchoolId: user.schoolId }, include: sheetInclude });
+  let sheet = await find();
   if (!sheet) throw new ApiError(404, "Mark sheet not found");
   const scope = await teacherScope(user);
   if (scope && (sheet.fkSubjectId !== scope.teacher.fkSubjectId || !scope.classIds.includes(sheet.fkClassId))) {
     throw new ApiError(403, "You can only open mark sheets for your own subject and classes.");
   }
+  if (await addMissingRows(sheet)) sheet = await find();
   return sheet;
 }
 
@@ -464,6 +420,7 @@ const TRANSITIONS = {
 async function transition(user, sheetId, action) {
   const sheet = await getSheet(user, sheetId);
   if (action === "reopen") {
+    if (sheet.status === SHEET_STATUS.DRAFT) throw new ApiError(400, "This mark sheet is already open for editing.");
     await sheet.update({ status: SHEET_STATUS.DRAFT, publishedAt: null, fkPublishedByUserId: null });
   } else {
     const [from, to] = TRANSITIONS[action];
@@ -612,9 +569,55 @@ async function listOverrides(user, { examId } = {}) {
   });
 }
 
-function gradeFor(percent) {
+/** Letter grade from the percentage; a failed result is always F, a pass never is. */
+function gradeFor(percent, passed) {
+  if (percent == null) return null;
+  if (!passed) return FAIL_GRADE;
   const band = GRADE_BANDS.find((item) => percent >= item.min);
-  return band ? band.grade : "F";
+  return band ? band.grade : GRADE_BANDS[GRADE_BANDS.length - 1].grade;
+}
+
+function percentOf(obtained, total) {
+  return total ? Math.round((obtained / total) * 10000) / 100 : null;
+}
+
+/**
+ * One student's outcome on one paper. Absent counts as a fail; Exempt is
+ * left out of totals and the overall result.
+ */
+function paperOutcome(sheet, row) {
+  const total = Number(sheet.totalMarks);
+  const passing = Number(sheet.passingMarks);
+  const base = { subjectId: sheet.fkSubjectId, subject: sheet.subject ? sheet.subject.name : null, total, passing };
+  if (!row) return { ...base, obtained: null, status: "Pending" };
+  if (row.isExempt) return { ...base, obtained: null, status: "Exempt" };
+  if (row.isAbsent) return { ...base, obtained: 0, status: "Absent" };
+  if (row.score == null) return { ...base, obtained: null, status: "Pending" };
+  const obtained = Number(row.score);
+  return { ...base, obtained, status: obtained >= passing ? "Pass" : "Fail" };
+}
+
+/** Combine paper outcomes: pass only if every counted paper is passed. */
+function overallOutcome(papers) {
+  const counted = papers.filter((paper) => paper.status !== "Exempt");
+  const obtained = counted.reduce((sum, paper) => sum + (paper.obtained || 0), 0);
+  const total = counted.reduce((sum, paper) => sum + paper.total, 0);
+  const failedPapers = counted.filter((paper) => paper.status === "Fail" || paper.status === "Absent").length;
+  let result;
+  if (!counted.length) result = "Exempt";
+  else if (counted.some((paper) => paper.status === "Pending")) result = "Pending";
+  else if (counted.every((paper) => paper.status === "Absent")) result = "Absent";
+  else result = failedPapers ? "Fail" : "Pass";
+  const percentage = result === "Pending" || result === "Exempt" ? null : percentOf(obtained, total);
+  return {
+    obtained,
+    total,
+    percentage,
+    failedPapers,
+    result,
+    passed: result === "Pass",
+    grade: percentage == null ? null : gradeFor(percentage, result === "Pass"),
+  };
 }
 
 /** Published result for one student. Rank is omitted until a tie policy exists. */
@@ -647,39 +650,32 @@ async function dmc(user, examId, studentId) {
     sheets = sheets.filter((sheet) => sheet.fkSubjectId === teacher.fkSubjectId);
   }
   if (!sheets.length) throw new ApiError(404, "No published result for this student");
-  const subjects = sheets.map((sheet) => {
-    const row = sheet.rows[0];
-    const score = row && row.score != null && !row.isAbsent ? Number(row.score) : null;
-    const max = Number(sheet.totalMarks);
-    const passing = Number(sheet.passingMarks);
-    const passed = score != null && score >= passing;
-    return {
-      subject: sheet.subject ? sheet.subject.name : null,
-      score,
-      max,
-      passing,
-      absent: Boolean(row && row.isAbsent),
-      result: row && row.isAbsent ? "Absent" : (passed ? "Pass" : "Fail"),
-    };
-  });
-  const total = subjects.reduce((sum, item) => sum + (item.score || 0), 0);
-  const max = subjects.reduce((sum, item) => sum + item.max, 0);
-  const percentage = max ? Math.round((total / max) * 10000) / 100 : null;
+  const papers = sheets.map((sheet) => paperOutcome(sheet, sheet.rows[0]));
+  const overall = overallOutcome(papers);
   return {
     student: { id: student.id, name: `${student.firstName} ${student.lastName}`, admissionNo: student.admissionNo },
     exam: { id: exam.id, name: exam.name },
-    subjects,
-    total,
-    max,
-    percentage,
-    grade: percentage == null ? null : gradeFor(percentage),
-    passed: subjects.every((item) => item.result === "Pass"),
+    subjects: papers.map((paper) => ({
+      subject: paper.subject,
+      score: paper.status === "Absent" ? null : paper.obtained,
+      max: paper.total,
+      passing: paper.passing,
+      absent: paper.status === "Absent",
+      exempt: paper.status === "Exempt",
+      result: paper.status,
+      grade: paper.obtained == null ? null : gradeFor(percentOf(paper.obtained, paper.total), paper.status === "Pass"),
+    })),
+    total: overall.obtained,
+    max: overall.total,
+    percentage: overall.percentage,
+    grade: overall.grade,
+    passed: overall.passed,
   };
 }
 
 function sheetProgress(sheet) {
   const rows = sheet.rows || [];
-  const entered = rows.filter((row) => row.obtainedMarks != null || row.score != null || row.isAbsent || row.isExempt).length;
+  const entered = rows.filter((row) => row.obtainedMarks != null || row.isAbsent || row.isExempt).length;
   return {
     id: sheet.id,
     classId: sheet.fkClassId,
@@ -688,6 +684,9 @@ function sheetProgress(sheet) {
     status: sheet.status,
     totalMarks: Number(sheet.totalMarks),
     passingMarks: Number(sheet.passingMarks),
+    paperDate: sheet.paperDate || null,
+    startTime: sheet.startTime ? String(sheet.startTime).slice(0, 5) : null,
+    endTime: sheet.endTime ? String(sheet.endTime).slice(0, 5) : null,
     entered,
     students: rows.length,
   };
@@ -707,7 +706,7 @@ async function listSummaries(user, { sessionId } = {}) {
       {
         model: MarkSheets,
         as: "markSheets",
-        attributes: ["id", "status", "fkClassId", "fkSubjectId", "totalMarks", "passingMarks"],
+        attributes: ["id", "status", "fkClassId", "fkSubjectId", "totalMarks", "passingMarks", "paperDate", "startTime", "endTime"],
         include: [
           { model: Subjects, as: "subject", attributes: ["id", "name"] },
           { model: MarkSheetRows, as: "rows", attributes: ["obtainedMarks", "isAbsent", "isExempt"] },
@@ -726,7 +725,13 @@ async function listSummaries(user, { sessionId } = {}) {
           (sheet) => sheet.fkSubjectId === scope.teacher.fkSubjectId && scope.classIds.includes(sheet.fkClassId),
         );
       }
-      const classes = plain.classes && plain.classes.length ? plain.classes : (plain.class ? [plain.class] : []);
+      const classes = sortClasses(plain.classes && plain.classes.length ? plain.classes : (plain.class ? [plain.class] : []));
+      const order = new Map(classes.map((klass, index) => [klass.id, index]));
+      sheets = [...sheets].sort(
+        (a, b) =>
+          (order.get(a.fkClassId) ?? 99) - (order.get(b.fkClassId) ?? 99) ||
+          String(a.subject ? a.subject.name : "").localeCompare(String(b.subject ? b.subject.name : "")),
+      );
       return {
         id: plain.id,
         name: plain.name,
@@ -736,17 +741,25 @@ async function listSummaries(user, { sessionId } = {}) {
         startDate: plain.startDate,
         endDate: plain.endDate,
         status: plain.status,
-        totalMarks: Number(plain.totalMarks),
-        passingMarks: Number(plain.passingMarks),
         feeMonth: plain.requiredFeeMonth,
-        classes: classes.map((klass) => ({
-          id: klass.id,
-          label: classLabel(klass),
-        })),
+        classes: classes.map((klass) => ({ id: klass.id, label: classLabel(klass) })),
         sheets: sheets.map(sheetProgress),
       };
     }).filter((exam) => !scope || exam.sheets.length),
   };
+}
+
+const LOCKED_EXAM = ["Published", "Finalised", "Archived"];
+
+function hasMarks(sheet) {
+  return (sheet.rows || []).some((row) => row.score != null || row.isAbsent || row.isExempt);
+}
+
+async function removeSheets(sheets, transaction) {
+  for (const sheet of sheets) {
+    await MarkSheetRows.destroy({ where: { fkMarkSheetId: sheet.id }, transaction });
+    await sheet.destroy({ force: true, transaction });
+  }
 }
 
 async function updateExam(actor, id, body) {
@@ -755,7 +768,7 @@ async function updateExam(actor, id, body) {
     include: [{ model: MarkSheets, as: "markSheets", include: [{ model: MarkSheetRows, as: "rows" }] }],
   });
   if (!exam) throw new ApiError(404, "Exam not found");
-  if (exam.status === "Published" || exam.status === "Finalised" || exam.status === "Archived") {
+  if (LOCKED_EXAM.includes(exam.status)) {
     throw new ApiError(400, "This exam is locked. Reopen its mark sheets before editing.");
   }
   if ((exam.markSheets || []).some((sheet) => sheet.status !== SHEET_STATUS.DRAFT)) {
@@ -771,138 +784,89 @@ async function updateExam(actor, id, body) {
   const startDate = body.startDate !== undefined ? body.startDate : exam.startDate;
   const endDate = body.endDate !== undefined ? body.endDate : exam.endDate;
   assertDates(startDate, endDate);
-  const usingPapers = Array.isArray(body.papers);
-  const marks = usingPapers
-    ? null
-    : assertMarks(
-      body.totalMarks != null ? body.totalMarks : exam.totalMarks,
-      body.passingMarks != null ? body.passingMarks : exam.passingMarks,
-    );
-  const plan = usingPapers ? await planPapers(actor, exam.fkSessionId, body.papers) : null;
-  const nextClassIds = plan
-    ? plan.map((item) => item.klass.id)
-    : Array.isArray(body.classIds)
-      ? [...new Set(body.classIds.map(Number))]
-      : null;
+  const plan = Array.isArray(body.papers)
+    ? await planPapers(actor, exam.fkSessionId, body.papers, { startDate, endDate })
+    : null;
   await sequelize.transaction(async (transaction) => {
-    const sample = plan ? plan[0].subjects[0].marks : marks;
     await exam.update(
       {
         name,
         examType,
         startDate: startDate || null,
         endDate: endDate || null,
-        totalMarks: sample.total,
-        passingMarks: sample.passing,
         feeMonth: endDate ? String(endDate).slice(0, 7) : exam.feeMonth,
       },
       { transaction },
     );
-    if (plan) {
-      const wanted = new Map();
-      for (const item of plan) {
-        for (const paper of item.subjects) wanted.set(`${item.klass.id}:${paper.subject.id}`, paper);
-      }
-      for (const sheet of exam.markSheets) {
-        const paper = wanted.get(`${sheet.fkClassId}:${sheet.fkSubjectId}`);
-        if (!paper) continue;
-        const tooHigh = (sheet.rows || []).some(
-          (row) => row.score != null && Number(row.score) > paper.marks.total,
-        );
-        if (tooHigh) {
-          throw new ApiError(400, "A saved mark is higher than the new paper total. Lower that mark first.");
-        }
-        await sheet.update({ maxScore: paper.marks.total, passPercent: paper.marks.passing }, { transaction });
-      }
-    } else {
-      for (const sheet of exam.markSheets) {
-        await sheet.update({ maxScore: marks.total, passPercent: marks.passing }, { transaction });
-      }
+    if (!plan) return;
+    const wanted = new Map();
+    for (const item of plan) {
+      for (const paper of item.subjects) wanted.set(`${item.klass.id}:${paper.subject.id}`, { item, paper });
     }
-    if (nextClassIds) {
-      if (!nextClassIds.length) throw new ApiError(400, "Select at least one class.");
-      const classes = await Classes.findAll({
-        where: { id: nextClassIds, fkSchoolId: actor.schoolId, fkSessionId: exam.fkSessionId },
+    for (const sheet of exam.markSheets) {
+      const match = wanted.get(`${sheet.fkClassId}:${sheet.fkSubjectId}`);
+      if (!match) {
+        if (hasMarks(sheet)) throw new ApiError(400, "A paper with entered marks cannot be removed.");
+        await removeSheets([sheet], transaction);
+        continue;
+      }
+      const tooHigh = (sheet.rows || []).some((row) => row.score != null && Number(row.score) > match.paper.marks.total);
+      if (tooHigh) throw new ApiError(400, "A saved mark is higher than the new paper total. Lower that mark first.");
+      await sheet.update(paperFields(match.paper.marks), { transaction });
+      wanted.delete(`${sheet.fkClassId}:${sheet.fkSubjectId}`);
+    }
+    for (const { item, paper } of wanted.values()) {
+      await createSheetForClass(actor, exam, item.klass, paper.subject.id, paper.marks, transaction);
+    }
+    const classIds = plan.map((item) => item.klass.id);
+    for (const classId of classIds) {
+      await ExamClasses.findOrCreate({
+        where: { fkExamId: exam.id, fkClassId: classId },
+        defaults: { fkExamId: exam.id, fkClassId: classId },
         transaction,
       });
-      if (classes.length !== nextClassIds.length) {
-        throw new ApiError(400, "Every class must belong to this exam's session.");
-      }
-      const currentIds = new Set((exam.markSheets || []).map((sheet) => sheet.fkClassId));
-      for (const klass of classes) {
-        const item = plan ? plan.find((entry) => entry.klass.id === klass.id) : null;
-        const subjectIds = item
-          ? item.subjects.map((paper) => paper.subject.id)
-          : await classSubjectService.offeredSubjectIds(actor.schoolId, klass.id);
-        if (!subjectIds.length) {
-          throw new ApiError(400, `${classLabel(klass)} has no subjects assigned.`);
-        }
-        await ExamClasses.findOrCreate({
-          where: { fkExamId: exam.id, fkClassId: klass.id },
-          defaults: { fkExamId: exam.id, fkClassId: klass.id },
-          transaction,
-        });
-        for (const subjectId of subjectIds) {
-          const exists = exam.markSheets.some(
-            (sheet) => sheet.fkClassId === klass.id && sheet.fkSubjectId === subjectId,
-          );
-          if (exists) continue;
-          const paperMarks = item
-            ? item.subjects.find((paper) => paper.subject.id === subjectId).marks
-            : marks;
-          await createSheetForClass(actor, exam, klass, subjectId, paperMarks, transaction);
-        }
-      }
-      const removeIds = [...currentIds].filter((classId) => !nextClassIds.includes(classId));
-      for (const classId of removeIds) {
-        const sheets = exam.markSheets.filter((sheet) => sheet.fkClassId === classId);
-        if (sheets.some((sheet) => (sheet.rows || []).some((row) => row.score != null || row.isAbsent || row.isExempt))) {
-          throw new ApiError(400, "A class with entered marks cannot be removed.");
-        }
-        for (const sheet of sheets) {
-          await MarkSheetRows.destroy({ where: { fkMarkSheetId: sheet.id }, transaction });
-          await sheet.destroy({ transaction });
-        }
-        await ExamClasses.destroy({ where: { fkExamId: exam.id, fkClassId: classId }, transaction });
-      }
-      if (plan) {
-        const keep = new Set();
-        for (const item of plan) {
-          for (const paper of item.subjects) keep.add(`${item.klass.id}:${paper.subject.id}`);
-        }
-        for (const sheet of exam.markSheets) {
-          if (!nextClassIds.includes(sheet.fkClassId) || keep.has(`${sheet.fkClassId}:${sheet.fkSubjectId}`)) continue;
-          if ((sheet.rows || []).some((row) => row.score != null || row.isAbsent || row.isExempt)) {
-            throw new ApiError(400, "A subject with entered marks cannot be removed.");
-          }
-          await MarkSheetRows.destroy({ where: { fkMarkSheetId: sheet.id }, transaction });
-          await sheet.destroy({ transaction });
-        }
-      }
-      await exam.update({ fkClassId: nextClassIds[0] }, { transaction });
     }
+    await ExamClasses.destroy({ where: { fkExamId: exam.id, fkClassId: { [Op.notIn]: classIds } }, transaction });
+    await exam.update({ fkClassId: classIds[0] }, { transaction });
+    if (body.rememberDefaults !== false) await rememberDefaults(plan, transaction);
     await syncExamStatus(exam.id, transaction);
-  }).catch((err) => {
-    if (err instanceof UniqueConstraintError) throw new ApiError(409, "An exam with this name already exists in the session.");
-    throw err;
-  });
+  }).catch(uniqueName);
   return getExam(actor, exam.id);
 }
 
+/** Only exams with no submitted work can be deleted; published ones are archived. */
 async function removeExam(actor, id) {
   const exam = await Exams.findOne({
     where: { id, fkSchoolId: actor.schoolId },
     include: [{ model: MarkSheets, as: "markSheets" }],
   });
   if (!exam) throw new ApiError(404, "Exam not found");
-  if (["Published", "Finalised", "Archived"].includes(exam.status)) {
-    throw new ApiError(400, "A finalised or published exam cannot be deleted.");
+  if (LOCKED_EXAM.includes(exam.status)) {
+    throw new ApiError(409, "A finalised or published exam cannot be deleted. Archive it instead.");
   }
   if ((exam.markSheets || []).some((sheet) => sheet.status !== SHEET_STATUS.DRAFT)) {
     throw new ApiError(400, "Reopen submitted mark sheets before deleting this exam.");
   }
-  await exam.destroy();
+  // Drafts are removed outright so the exam name can be reused.
+  await sequelize.transaction(async (transaction) => {
+    await removeSheets(exam.markSheets || [], transaction);
+    await ExamClasses.destroy({ where: { fkExamId: exam.id }, transaction });
+    await exam.destroy({ force: true, transaction });
+  });
+  await auditService.record(actor, `deleted exam ${exam.name}`, { entityType: "exam", entityId: exam.id });
   return { id: Number(id) };
+}
+
+async function archiveExam(actor, id) {
+  const exam = await Exams.findOne({ where: { id, fkSchoolId: actor.schoolId } });
+  if (!exam) throw new ApiError(404, "Exam not found");
+  if (exam.status === "Archived") return getExam(actor, exam.id);
+  if (!["Published", "Finalised"].includes(exam.status)) {
+    throw new ApiError(400, "Only a finalised or published exam can be archived. Delete a draft exam instead.");
+  }
+  await exam.update({ status: "Archived" });
+  await auditService.record(actor, `archived exam ${exam.name}`, { entityType: "exam", entityId: exam.id });
+  return getExam(actor, exam.id);
 }
 
 function rankValue(items, scoreOf, tie) {
@@ -925,6 +889,10 @@ function rankValue(items, scoreOf, tie) {
   return ranks;
 }
 
+/**
+ * Results for one class: either one paper (subjectId) or every paper with an
+ * overall Pass/Fail per student. Ranks are within the class only.
+ */
 async function results(user, examId, { classId, subjectId } = {}) {
   const exam = await Exams.findOne({
     where: { id: examId, fkSchoolId: user.schoolId },
@@ -946,100 +914,70 @@ async function results(user, examId, { classId, subjectId } = {}) {
   if (scope) {
     sheets = sheets.filter((sheet) => sheet.fkSubjectId === scope.teacher.fkSubjectId && scope.classIds.includes(sheet.fkClassId));
   }
-  if (classId) sheets = sheets.filter((sheet) => sheet.fkClassId === Number(classId));
+  const targetClassId = classId
+    ? Number(classId)
+    : (sortClasses(sheets.map((sheet) => sheet.class).filter(Boolean))[0] || {}).id;
+  sheets = sheets.filter((sheet) => sheet.fkClassId === targetClassId);
   if (subjectId) sheets = sheets.filter((sheet) => sheet.fkSubjectId === Number(subjectId));
   if (!sheets.length) throw new ApiError(404, "No mark sheet matches that exam, class, and subject.");
+  sheets.sort((a, b) => String(a.subject ? a.subject.name : "").localeCompare(String(b.subject ? b.subject.name : "")));
   const { feeRule, rankTie } = await settingsService.get(user.schoolId, SETTING_KEYS.RESULT_VISIBILITY);
-  const byStudent = new Map();
+
+  const students = new Map();
   for (const sheet of sheets) {
     for (const row of sheet.rows || []) {
-      const student = row.student;
-      if (!student) continue;
-      const current = byStudent.get(student.id) || {
-        studentId: student.id,
-        name: `${student.firstName} ${student.lastName}`.trim(),
-        admissionNo: student.admissionNo,
-        obtained: 0,
-        total: 0,
-        absent: false,
-        exempt: false,
-        scored: false,
-      };
-      const max = Number(sheet.totalMarks);
-      const passing = Number(sheet.passingMarks);
-      if (row.isExempt) {
-        current.exempt = true;
-      } else if (row.isAbsent || row.score == null) {
-        current.absent = row.isAbsent || current.absent;
-        current.total += max;
-        if (row.isAbsent) current.obtained += 0;
-      } else {
-        current.scored = true;
-        current.obtained += Number(row.score);
-        current.total += max;
-        current.passing = (current.passing || 0) + passing;
-      }
-      byStudent.set(student.id, current);
+      if (row.student && !students.has(row.student.id)) students.set(row.student.id, row.student);
     }
   }
-  const rows = [...byStudent.values()].map((row) => {
-    const percentage = row.total ? Math.round((row.obtained / row.total) * 10000) / 100 : null;
-    const passed = row.scored && !row.absent && row.obtained >= (row.passing || 0);
+  const rows = [...students.values()].map((student) => {
+    const papers = sheets.map((sheet) => paperOutcome(sheet, (sheet.rows || []).find((row) => row.fkStudentId === student.id)));
     return {
-      ...row,
-      percentage,
-      grade: percentage == null || row.absent ? null : gradeFor(percentage),
-      result: row.exempt && !row.scored ? "Exempt" : row.absent && !row.scored ? "Absent" : row.scored ? (passed ? "Pass" : "Fail") : "Pending",
+      studentId: student.id,
+      name: `${student.firstName} ${student.lastName}`.trim(),
+      admissionNo: student.admissionNo,
+      papers,
+      ...overallOutcome(papers),
     };
   });
-  const subjectRanks = rankValue(rows, (row) => (row.result === "Pending" || row.result === "Exempt" ? null : row.percentage), rankTie || "shared");
-  const overallPool = [];
-  const allSheets = (exam.markSheets || []).filter((sheet) => !scope || (sheet.fkSubjectId === scope.teacher.fkSubjectId && scope.classIds.includes(sheet.fkClassId)));
-  const overallByStudent = new Map();
-  for (const sheet of allSheets) {
-    for (const row of sheet.rows || []) {
-      if (!row.student || row.isExempt) continue;
-      const current = overallByStudent.get(row.student.id) || { obtained: 0, total: 0 };
-      current.total += Number(sheet.totalMarks);
-      current.obtained += row.isAbsent || row.score == null ? 0 : Number(row.score);
-      overallByStudent.set(row.student.id, current);
-    }
-  }
-  for (const [studentId, totals] of overallByStudent) {
-    overallPool.push({ studentId, percentage: totals.total ? totals.obtained / totals.total : null });
-  }
-  const overallRanks = rankValue(overallPool, (row) => row.percentage, rankTie || "shared");
-  const overallIndex = new Map(overallPool.map((row, index) => [row.studentId, index]));
+  const ranks = rankValue(rows, (row) => (row.result === "Pending" || row.result === "Exempt" ? null : row.percentage), rankTie || "shared");
+  const published = sheets.some((sheet) => sheet.status === SHEET_STATUS.PUBLISHED);
   const decorated = [];
   for (let index = 0; index < rows.length; index += 1) {
     const row = rows[index];
     const gate = await visibility(user.schoolId, exam, row.studentId, feeRule);
-    const published = sheets.some((sheet) => sheet.status === SHEET_STATUS.PUBLISHED);
     decorated.push({
       studentId: row.studentId,
       name: row.name,
       admissionNo: row.admissionNo,
-      obtained: row.scored || row.absent ? row.obtained : null,
+      obtained: row.result === "Pending" || row.result === "Exempt" ? null : row.obtained,
       total: row.total,
       percentage: row.percentage,
       grade: row.grade,
       result: row.result,
-      classRank: subjectRanks.get(index) ?? null,
-      subjectRank: subjectRanks.get(index) ?? null,
-      overallRank: overallRanks.get(overallIndex.get(row.studentId)) ?? null,
+      failedPapers: row.failedPapers,
+      papers: row.papers.map((paper) => ({ subjectId: paper.subjectId, obtained: paper.obtained, status: paper.status })),
+      classRank: ranks.get(index) ?? null,
       visibility: published && gate.visible ? (gate.overridden && !gate.feeCleared ? "override" : "visible") : gate.overridden ? "override" : "hidden",
       overrideId: gate.override ? gate.override.id : null,
     });
   }
   decorated.sort((a, b) => a.name.localeCompare(b.name));
-  const sheet = sheets.length === 1 ? sheets[0] : null;
-  const labelSource = sheets[0];
+  const single = sheets.length === 1 ? sheets[0] : null;
   return {
     exam: { id: exam.id, name: exam.name, status: exam.status, examType: exam.examType },
-    classLabel: labelSource && labelSource.class ? classLabel(labelSource.class) : null,
-    subject: sheet && sheet.subject ? sheet.subject.name : sheets.length > 1 ? "All subjects" : null,
-    totalMarks: sheet ? Number(sheet.totalMarks) : null,
-    sheetStatus: sheet ? sheet.status : null,
+    classId: targetClassId,
+    classLabel: sheets[0].class ? classLabel(sheets[0].class) : null,
+    subject: single && single.subject ? single.subject.name : "All subjects",
+    papers: sheets.map((sheet) => ({
+      sheetId: sheet.id,
+      subjectId: sheet.fkSubjectId,
+      subject: sheet.subject ? sheet.subject.name : "Subject",
+      totalMarks: Number(sheet.totalMarks),
+      passingMarks: Number(sheet.passingMarks),
+      status: sheet.status,
+    })),
+    totalMarks: sheets.reduce((sum, sheet) => sum + Number(sheet.totalMarks), 0),
+    sheetStatus: single ? single.status : null,
     rankTie: rankTie || "shared",
     feeRule,
     rows: decorated,
@@ -1065,7 +1003,8 @@ async function advance(actor, examId) {
   if (sheets.every((sheet) => sheet.status === SHEET_STATUS.PUBLISHED)) {
     throw new ApiError(400, "This exam is already published.");
   }
-  throw new ApiError(400, "Every subject sheet must be submitted before review, and verified before publishing.");
+  const submitted = sheets.filter((sheet) => sheet.status !== SHEET_STATUS.DRAFT).length;
+  throw new ApiError(400, `${submitted} of ${sheets.length} mark sheets are submitted. Submit every sheet before review.`);
 }
 
 async function grantBulkOverrides(actor, examId, { classId, reason }) {
@@ -1091,6 +1030,7 @@ module.exports = {
   create,
   updateExam,
   removeExam,
+  archiveExam,
   getExam,
   getSheet,
   updateRows,
@@ -1105,5 +1045,8 @@ module.exports = {
   listOverrides,
   feeCleared,
   dmc,
+  gradeFor,
+  paperOutcome,
+  overallOutcome,
   EXAM_TYPES,
 };

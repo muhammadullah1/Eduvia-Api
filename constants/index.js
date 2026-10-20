@@ -162,9 +162,11 @@ exports.SETTING_DEFAULTS = {
 };
 
 /**
- * Working grade scale. The SRS names A+ at 90 and F below 50 and leaves the
- * bands between them as school configuration. These even steps are the default
- * until the school replaces them.
+ * Grade scale (EDUVIA-11). The letter comes from the percentage, but pass/fail
+ * comes from each paper's own passing marks:
+ *   A+ ≥ 90 · A ≥ 80 · B ≥ 70 · C ≥ 60 · D ≥ 50 · E = passed below 50 · F = failed.
+ * A failed paper (or a student who failed any paper) is always F, and a passed
+ * paper is never F — e.g. 40/100 with a pass mark of 40 is an E.
  */
 exports.GRADE_BANDS = [
   { min: 90, grade: "A+" },
@@ -172,8 +174,11 @@ exports.GRADE_BANDS = [
   { min: 70, grade: "B" },
   { min: 60, grade: "C" },
   { min: 50, grade: "D" },
-  { min: 0, grade: "F" },
+  { min: 0, grade: "E" },
 ];
+
+/** Grade shown for any failed paper or failed overall result. */
+exports.FAIL_GRADE = "F";
 
 exports.WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 

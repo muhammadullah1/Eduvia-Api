@@ -17,6 +17,7 @@ const {
   StudentStatusEvents,
   StudentFeeMonths,
   Exams,
+  ClassSubjects,
 } = require("../../models");
 const studentService = require("../../services/student.service");
 const leaveService = require("../../services/leave.service");
@@ -217,8 +218,14 @@ describe("lifecycle, leave, reports, and documents", () => {
 
   test("a published result can be downloaded without a rank, and unpaid fees withhold the parent copy", async () => {
     const fx = await buildSchool();
+    await ClassSubjects.findOrCreate({ where: { fkClassId: fx.klass.id, fkSubjectId: fx.subject.id } });
     const exam = await examService.create(fx.actor, {
-      classId: fx.klass.id, name: "Midterm", subjects: [{ subjectId: fx.subject.id, maxScore: 100, teacherId: fx.teacher.id }],
+      name: "Midterm",
+      examType: "Mid-Term",
+      sessionId: fx.session.id,
+      startDate: "2026-04-20",
+      endDate: "2026-04-24",
+      papers: [{ classId: fx.klass.id, subjectId: fx.subject.id, totalMarks: 100, passingMarks: 40 }],
     });
     const sheet = exam.markSheets[0];
     await examService.updateRows(fx.actor, sheet.id, [{ studentId: fx.student.id, score: 95 }]);

@@ -1,10 +1,22 @@
 "use strict";
 
 const Joi = require("joi");
-const { id, idParam, isoMonth } = require("./common");
+const { id, idParam } = require("./common");
 
 const examType = Joi.string().valid("Mid-Term", "Monthly Test", "Final Term", "Unit Test");
 const isoDate = Joi.string().pattern(/^\d{4}-\d{2}-\d{2}$/);
+
+const clock = Joi.string().pattern(/^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/);
+
+const papers = Joi.array().items(Joi.object({
+  classId: id.required(),
+  subjectId: id.required(),
+  totalMarks: Joi.number().positive().max(1000).required(),
+  passingMarks: Joi.number().min(0).max(1000).required(),
+  paperDate: isoDate.allow(null, ""),
+  startTime: clock.allow(null, ""),
+  endTime: clock.allow(null, ""),
+})).min(1);
 
 const sheetParam = { params: Joi.object({ sheetId: id.required() }) };
 
@@ -18,46 +30,15 @@ module.exports = {
     }),
   },
   validateCreate: {
-    body: Joi.alternatives().try(
-      Joi.object({
-        papers: Joi.array().items(Joi.object({
-          classId: id.required(),
-          subjectId: id.required(),
-          totalMarks: Joi.number().positive().max(1000).required(),
-          passingMarks: Joi.number().min(0).max(1000).required(),
-        })).min(1).required(),
-        name: Joi.string().max(100).required(),
-        examType: examType.required(),
-        sessionId: id.required(),
-        startDate: isoDate.required(),
-        endDate: isoDate.required(),
-      }),
-      Joi.object({
-        classIds: Joi.array().items(id).min(1).required(),
-        name: Joi.string().max(100).required(),
-        examType: examType.required(),
-        sessionId: id.required(),
-        startDate: isoDate.required(),
-        endDate: isoDate.required(),
-        totalMarks: Joi.number().positive().max(1000).required(),
-        passingMarks: Joi.number().min(0).max(1000).required(),
-      }),
-      Joi.object({
-        classId: id.required(),
-        name: Joi.string().max(120).required(),
-        feeMonth: isoMonth.allow(null),
-        sessionId: id,
-        startDate: isoDate,
-        endDate: isoDate,
-        examType,
-        totalMarks: Joi.number().positive().max(1000),
-        passingMarks: Joi.number().min(0).max(1000),
-        subjects: Joi.array()
-          .items(Joi.object({ subjectId: id.required(), maxScore: Joi.number().positive().default(100), teacherId: id }))
-          .min(1)
-          .required(),
-      }),
-    ),
+    body: Joi.object({
+      name: Joi.string().max(100).required(),
+      examType: examType.required(),
+      sessionId: id.required(),
+      startDate: isoDate.required(),
+      endDate: isoDate.required(),
+      papers: papers.required(),
+      rememberDefaults: Joi.boolean(),
+    }),
   },
   validateUpdate: {
     ...idParam,
@@ -67,15 +48,8 @@ module.exports = {
       sessionId: id,
       startDate: isoDate.allow(null),
       endDate: isoDate.allow(null),
-      totalMarks: Joi.number().positive().max(1000),
-      passingMarks: Joi.number().min(0).max(1000),
-      classIds: Joi.array().items(id).min(1),
-      papers: Joi.array().items(Joi.object({
-        classId: id.required(),
-        subjectId: id.required(),
-        totalMarks: Joi.number().positive().max(1000).required(),
-        passingMarks: Joi.number().min(0).max(1000).required(),
-      })).min(1),
+      papers,
+      rememberDefaults: Joi.boolean(),
     }).min(1),
   },
   validateRows: {

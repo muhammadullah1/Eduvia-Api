@@ -27,6 +27,7 @@ router.post("/:id/overrides/bulk", override, validate(v.validateBulkOverride), c
 router.get("/:id/documents/:kind", authorize("exams.read"), validate(v.validateDocument), c.document);
 router.patch("/:id", authorize("exams.create"), validate(v.validateUpdate), c.update);
 router.delete("/:id", authorize("exams.create"), validate(v.validateId), c.remove);
+router.post("/:id/archive", authorize("exams.create"), validate(v.validateId), c.archive);
 router.get("/:id/dmc", authorize("exams.read"), validate(v.validateDmc), c.dmc);
 router.get("/:id", authorize("exams.read"), validate(v.validateId), c.getById);
 router.get("/:id/visibility", override, validate(v.validateId), c.gateStatus);

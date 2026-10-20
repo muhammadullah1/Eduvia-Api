@@ -50,9 +50,19 @@ function resultLines(title, data) {
 
 async function examDocument(user, kind, examId, query) {
   if (kind === "overall") {
-    const data = await examService.results(user, examId, {});
-    if (query.format === "pdf") return textPdf(resultLines("Overall examination report", data));
-    return data;
+    // Ranks are per class, so the overall report is one block per class.
+    const summary = await examService.listSummaries(user, {});
+    const exam = summary.exams.find((item) => item.id === Number(examId));
+    const classIds = exam ? exam.classes.map((klass) => klass.id) : [];
+    const blocks = [];
+    for (const classId of classIds) {
+      blocks.push(await examService.results(user, examId, { classId }));
+    }
+    if (!blocks.length) blocks.push(await examService.results(user, examId, {}));
+    if (query.format === "pdf") {
+      return textPdf(["Overall examination report", ...blocks.flatMap((data) => resultLines("", data).slice(1))]);
+    }
+    return { classes: blocks };
   }
   if (!query.classId) throw new ApiError(400, "Choose a class for this document.");
   if (kind === "mark-sheet" && !query.subjectId) throw new ApiError(400, "Choose a subject for the mark sheet.");

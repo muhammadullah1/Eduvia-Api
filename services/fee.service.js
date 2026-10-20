@@ -90,6 +90,20 @@ async function ledgerStart(schoolId, student, fallback, transaction) {
   return candidates.length ? candidates.sort().pop() : fallback;
 }
 
+/**
+ * A month is due on the school's due day. A student admitted after that day
+ * gets the same number of days from admission, so a new admission is never
+ * overdue on day one.
+ */
+function dueDateFor(student, month, dueDay) {
+  const standard = `${monthStamp(month)}-${String(dueDay).padStart(2, "0")}`;
+  const admitted = student.admittedOn ? isoDay(student.admittedOn) : null;
+  if (!admitted || monthStamp(admitted) !== monthStamp(month) || admitted <= standard) return standard;
+  const grace = new Date(`${admitted}T00:00:00Z`);
+  grace.setUTCDate(grace.getUTCDate() + Number(dueDay));
+  return grace.toISOString().slice(0, 10);
+}
+
 async function createMonth(schoolId, student, month, amountDue, dueDay, transaction) {
   await StudentFeeMonths.findOrCreate({
     where: { fkStudentId: student.id, month, feeType: "Tuition" },
@@ -100,7 +114,7 @@ async function createMonth(schoolId, student, month, amountDue, dueDay, transact
       netAmount: amountDue,
       paidAmount: 0,
       status: FEE_MONTH_STATUS.UNPAID,
-      dueDate: `${month.slice(0, 7)}-${String(dueDay).padStart(2, "0")}`,
+      dueDate: dueDateFor(student, month, dueDay),
     },
     transaction,
   });
@@ -542,6 +556,7 @@ async function importPayments(actor, { contentBase64 }) {
 }
 
 module.exports = {
+  dueDateFor,
   generateMonths,
   openLedger,
   listMonths,

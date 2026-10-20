@@ -1,5 +1,6 @@
 "use strict";
 
+const { Op } = require("sequelize");
 const { Students, Classes, Parents, Users, StudentStatusEvents, StudentPromotions, StudentFeeMonths, AcademicSessions, sequelize } = require("../models");
 const { STUDENT_STATUS } = require("../constants");
 const ApiError = require("../utils/ApiError");
@@ -9,8 +10,13 @@ const auditService = require("./audit.service");
  * `scope` narrows rows for restricted roles: parents get their linked
  * children only, teachers the classes they teach (see access.service).
  */
-async function list(schoolId, { classId, status, page = 1, pageSize = 50 } = {}, scope = {}) {
+async function list(schoolId, { classId, status, search, page = 1, pageSize = 50 } = {}, scope = {}) {
   const where = { fkSchoolId: schoolId };
+  const term = String(search || "").trim();
+  if (term) {
+    const like = { [Op.iLike]: `%${term}%` };
+    where[Op.or] = [{ firstName: like }, { lastName: like }, { admissionNo: like }];
+  }
   if (classId) where.fkClassId = classId;
   if (scope.studentIds) where.id = scope.studentIds;
   if (scope.classIds) where.fkClassId = classId ? scope.classIds.filter((id) => id === Number(classId)) : scope.classIds;
@@ -19,8 +25,18 @@ async function list(schoolId, { classId, status, page = 1, pageSize = 50 } = {},
   const offset = (Math.max(Number(page) || 1, 1) - 1) * limit;
   const { rows, count } = await Students.findAndCountAll({
     where,
-    include: [{ model: Classes, as: "class", attributes: ["id", "label", "grade", "section"] }],
+    include: [
+      { model: Classes, as: "class", attributes: ["id", "label", "grade", "section"] },
+      {
+        model: Parents,
+        as: "parents",
+        attributes: ["id", "guardianName", "fatherName", "motherName", "primaryContactNumber"],
+        through: { attributes: ["isPrimary", "relationshipType"] },
+        include: [{ model: Users, as: "user", attributes: ["id", "firstName", "lastName", "phone", "email"] }],
+      },
+    ],
     order: [["lastName", "ASC"], ["firstName", "ASC"]],
+    distinct: true,
     limit,
     offset,
   });

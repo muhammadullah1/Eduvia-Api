@@ -1,6 +1,7 @@
 "use strict";
 
 const applicationService = require("../../services/application.service");
+const studentService = require("../../services/student.service");
 const { serializeApplication } = require("../../utils/applicationSerializer");
 const { sequelize, Schools, AcademicSessions, Users, Classes } = require("../../models");
 const { USER_ROLES } = require("../../constants");
@@ -84,6 +85,30 @@ describe("application service", () => {
     );
     expect(enrolled.application.status).toBe("Enrolled");
     expect(enrolled.student).toBeTruthy();
+  });
+
+  test("a guardian without an email can still be enrolled and listed", async () => {
+    const fx = await buildFixture();
+    const draft = await applicationService.createDraft(fx.school.id, { name: "Zara Noor", fkClassId: fx.klass.id });
+    await applicationService.update(draft.id, fx.school.id, {
+      guardian: "Imran Noor",
+      guardianRelation: "Father",
+      phone: "03007654321",
+      dob: "2019-03-10",
+      gender: "Female",
+      address: "7 Mall Road",
+      documents: draft.documents.map((d) => ({ id: d.id, label: d.label, status: "Uploaded" })),
+    });
+    await applicationService.submit(draft.id, fx.school.id);
+    await applicationService.decide(draft.id, fx.school.id, "Admit", "Recommended");
+    const enrolled = await applicationService.enroll(draft.id, fx.school.id, {}, { id: fx.admin.id, schoolId: fx.school.id, role: fx.admin.role });
+    const { rows } = await studentService.list(fx.school.id, { classId: fx.klass.id });
+    const [guardian] = rows.find((row) => row.id === enrolled.student.id).parents;
+    expect(guardian.guardianName).toBe("Imran Noor");
+    expect(guardian.primaryContactNumber).toBe("03007654321");
+    expect(guardian.user).toBeNull();
+    const page = await applicationService.list(fx.school.id, { page: 1, pageSize: 10 });
+    expect(page.count).toBe(page.rows.length);
   });
 
   test("cannot decide before submit", async () => {

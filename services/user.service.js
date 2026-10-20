@@ -202,7 +202,7 @@ async function createStaffUser(actor, payload) {
   const school = await Schools.findByPk(schoolId, { attributes: ["name"] });
   try {
     await authService.sendUserInvitation(user, role, school?.name);
-  } catch (err) {
+  } catch {
     throw new ApiError(
       502,
       "The staff account was created, but the invitation email could not be sent. Open the staff profile and resend the invitation.",

@@ -14,6 +14,7 @@ module.exports = {
   create: handle("Exam created", (req) => examService.create(req.user, req.body), 201),
   update: handle("Exam updated", (req) => examService.updateExam(req.user, req.params.id, req.body)),
   remove: handle("Exam deleted", (req) => examService.removeExam(req.user, req.params.id)),
+  archive: handle("Exam archived", (req) => examService.archiveExam(req.user, req.params.id)),
   results: handle("Results", (req) => examService.results(req.user, req.params.id, req.query)),
   advance: handle("Exam status updated", (req) => examService.advance(req.user, req.params.id)),
   grantBulk: handle("Results released", (req) => examService.grantBulkOverrides(req.user, req.params.id, req.body), 201),
