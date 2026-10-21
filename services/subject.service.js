@@ -3,6 +3,7 @@
 const { Op } = require("sequelize");
 const { Subjects, TimetableSlots, Classes } = require("../models");
 const ApiError = require("../utils/ApiError");
+const classSubjectService = require("./class_subject.service");
 
 async function timetableUsage(subjectId, schoolId) {
   const slots = await TimetableSlots.findAll({
@@ -39,7 +40,10 @@ async function assertNotScheduled(subjectId, schoolId) {
   );
 }
 
-async function list(schoolId, { archived, search } = {}) {
+async function list(schoolId, { archived, search, classId } = {}) {
+  if (classId) {
+    return classSubjectService.listOffered(schoolId, Number(classId));
+  }
   const where = { fkSchoolId: schoolId };
   if (search && String(search).trim()) {
     where.name = { [Op.iLike]: `%${String(search).trim()}%` };

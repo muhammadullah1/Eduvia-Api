@@ -17,6 +17,7 @@ const {
   StudentStatusEvents,
   StudentFeeMonths,
   Exams,
+  ClassSubjects,
 } = require("../../models");
 const studentService = require("../../services/student.service");
 const leaveService = require("../../services/leave.service");
@@ -217,8 +218,14 @@ describe("lifecycle, leave, reports, and documents", () => {
 
   test("a published result can be downloaded without a rank, and unpaid fees withhold the parent copy", async () => {
     const fx = await buildSchool();
+    await ClassSubjects.findOrCreate({ where: { fkClassId: fx.klass.id, fkSubjectId: fx.subject.id } });
     const exam = await examService.create(fx.actor, {
-      classId: fx.klass.id, name: "Midterm", subjects: [{ subjectId: fx.subject.id, maxScore: 100, teacherId: fx.teacher.id }],
+      name: "Midterm",
+      examType: "Mid-Term",
+      sessionId: fx.session.id,
+      startDate: "2026-04-20",
+      endDate: "2026-04-24",
+      papers: [{ classId: fx.klass.id, subjectId: fx.subject.id, totalMarks: 100, passingMarks: 40 }],
     });
     const sheet = exam.markSheets[0];
     await examService.updateRows(fx.actor, sheet.id, [{ studentId: fx.student.id, score: 95 }]);
@@ -248,6 +255,64 @@ describe("lifecycle, leave, reports, and documents", () => {
     });
     expect(response.status).toBe(200);
     expect(response.type).toContain("application/pdf");
+  });
+
+  test("exam documents carry header meta, paper grades and stats, and stay staff-only except the DMC", async () => {
+    const fx = await buildSchool();
+    await ClassSubjects.findOrCreate({ where: { fkClassId: fx.klass.id, fkSubjectId: fx.subject.id } });
+    const exam = await examService.create(fx.actor, {
+      name: "Final",
+      examType: "Final Term",
+      sessionId: fx.session.id,
+      startDate: "2026-04-20",
+      endDate: "2026-04-24",
+      papers: [{ classId: fx.klass.id, subjectId: fx.subject.id, totalMarks: 100, passingMarks: 40 }],
+    });
+    const sheet = exam.markSheets[0];
+    await examService.updateRows(fx.actor, sheet.id, [{ studentId: fx.student.id, score: 72 }]);
+
+    const draft = await examService.dmc(fx.actor, exam.id, fx.student.id);
+    expect(draft.provisional).toBe(true);
+    expect(draft.classRank).toBe(1);
+    expect(draft.student.guardian).toBe("Imran Khan");
+    expect(draft.subjects[0]).toMatchObject({ score: 72, max: 100, passing: 40, result: "Pass" });
+
+    const sheetDoc = await documentService.examDocument(fx.actor, "result-sheet", exam.id, { classId: fx.klass.id });
+    expect(sheetDoc.meta.exam).toMatchObject({ name: "Final", startDate: "2026-04-20" });
+    expect(sheetDoc.meta.school.name).toBeTruthy();
+    expect(sheetDoc.rows[0].papers[0].grade).toBeTruthy();
+    expect(sheetDoc.paperStats[0]).toMatchObject({ sat: 1, passed: 1, highest: 72, average: 72 });
+
+    const overall = await documentService.examDocument(fx.actor, "overall", exam.id, {});
+    expect(overall.classes).toHaveLength(1);
+    await expect(documentService.examDocument(fx.actor, "nope", exam.id, {})).rejects.toMatchObject({ statusCode: 400 });
+
+    const parent = { id: fx.parentUser.id, schoolId: fx.school.id, role: fx.parentUser.role, email: fx.parentUser.email };
+    await expect(documentService.examDocument(parent, "class-report", exam.id, { classId: fx.klass.id })).rejects.toMatchObject({ statusCode: 403 });
+    await expect(examService.results(parent, exam.id, { classId: fx.klass.id })).rejects.toMatchObject({ statusCode: 403 });
+    await expect(documentService.examDocument(parent, "dmc", exam.id, { studentId: fx.student.id })).rejects.toMatchObject({ statusCode: 404 });
+
+    await examService.transition(fx.actor, sheet.id, "submit");
+    await examService.transition(fx.actor, sheet.id, "verify");
+    await examService.transition(fx.actor, sheet.id, "publish");
+    const visible = await documentService.examDocument(parent, "dmc", exam.id, { studentId: fx.student.id });
+    expect(visible.provisional).toBe(false);
+    expect(visible.meta.exam.name).toBe("Final");
+    expect(visible.percentage).toBe(72);
+
+    const overHttp = await httpRaw({
+      method: "GET",
+      path: `/api/exams/${exam.id}/documents/dmc?studentId=${fx.student.id}`,
+      token: tokenFor(fx.parentUser, fx.school),
+    });
+    expect(overHttp.status).toBe(200);
+    expect(overHttp.body.data.student.admissionNo).toBe(fx.student.admissionNo);
+    const classHttp = await httpRaw({
+      method: "GET",
+      path: `/api/exams/${exam.id}/documents/result-sheet?classId=${fx.klass.id}`,
+      token: tokenFor(fx.parentUser, fx.school),
+    });
+    expect(classHttp.status).toBe(403);
   });
 
   test("excel import pays through the ledger once and skips a repeated reference", async () => {

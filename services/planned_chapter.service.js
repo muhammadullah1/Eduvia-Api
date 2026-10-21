@@ -3,6 +3,7 @@
 const { Op } = require("sequelize");
 const { PlannedChapters, Classes, Subjects, sequelize } = require("../models");
 const ApiError = require("../utils/ApiError");
+const classSubjectService = require("./class_subject.service");
 
 /** Chapters/lessons the operations manager plans per class + subject (UR-04 §6.1). */
 
@@ -32,6 +33,10 @@ async function create(actor, data) {
     Subjects.findOne({ where: { id: data.fkSubjectId, fkSchoolId: actor.schoolId } }),
   ]);
   if (!klass || !subject) throw new ApiError(404, "Class or subject not found");
+  const offered = await classSubjectService.offeredSubjectIds(actor.schoolId, klass.id);
+  if (!offered.includes(subject.id)) {
+    throw new ApiError(400, `${klass.label} does not take ${subject.name}.`);
+  }
   const sequence =
     data.sequence || ((await PlannedChapters.max("chapterNo", { where: { fkClassId: klass.id, fkSubjectId: subject.id } })) || 0) + 1;
   if (await PlannedChapters.findOne({ where: { fkClassId: klass.id, fkSubjectId: subject.id, chapterNo: sequence } })) {

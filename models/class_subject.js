@@ -30,6 +30,18 @@ module.exports = (sequelize, DataTypes) => {
       defaultValue: false,
       field: "is_elective",
     },
+    defaultTotalMarks: {
+      type: DataTypes.DECIMAL(6, 2),
+      allowNull: false,
+      defaultValue: 100,
+      field: "default_total_marks",
+    },
+    defaultPassingMarks: {
+      type: DataTypes.DECIMAL(6, 2),
+      allowNull: false,
+      defaultValue: 40,
+      field: "default_passing_marks",
+    },
   },
     {
       tableName: "class_subjects",

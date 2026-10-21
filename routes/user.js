@@ -9,6 +9,12 @@ const v = require("../validations/user");
 const router = express.Router();
 
 router.get("/", authorize("users.read"), c.list);
+router.post(
+  "/photo/presign",
+  authorize("users.create"),
+  validate(v.validatePhotoPresign),
+  c.presignPhoto
+);
 router.post("/", authorize("users.create"), validate(v.validateCreate), c.create);
 router.post(
   "/:id/resend-invitation",

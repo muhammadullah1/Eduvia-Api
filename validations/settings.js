@@ -14,6 +14,7 @@ const bodies = {
   [SETTING_KEYS.RESULT_VISIBILITY]: Joi.object({
     feeRule: Joi.string().valid(...Object.values(RESULT_FEE_RULES)),
     requireOverrideReason: Joi.boolean(),
+    rankTie: Joi.string().valid("shared", "dense"),
   }).min(1),
   [SETTING_KEYS.FEES]: Joi.object({
     defaultMonthlyFee: Joi.number().min(0),

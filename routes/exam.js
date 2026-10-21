@@ -19,7 +19,15 @@ router.post("/sheets/:sheetId/verify", authorize("exams.verify"), validate(v.val
 router.post("/sheets/:sheetId/publish", authorize("exams.publish"), validate(v.validateSheet), c.publish);
 router.post("/sheets/:sheetId/reopen", authorize("exams.verify"), validate(v.validateSheet), c.reopen);
 router.get("/", authorize("exams.read"), validate(v.validateList), c.list);
+router.get("/papers", authorize("exams.read"), validate(v.validatePapers), c.papers);
 router.post("/", authorize("exams.create"), validate(v.validateCreate), c.create);
+router.get("/:id/results", authorize("exams.read"), validate(v.validateResults), c.results);
+router.post("/:id/advance", authorize("exams.verify"), validate(v.validateId), c.advance);
+router.post("/:id/overrides/bulk", override, validate(v.validateBulkOverride), c.grantBulk);
+router.get("/:id/documents/:kind", authorize("exams.read"), validate(v.validateDocument), c.document);
+router.patch("/:id", authorize("exams.create"), validate(v.validateUpdate), c.update);
+router.delete("/:id", authorize("exams.create"), validate(v.validateId), c.remove);
+router.post("/:id/archive", authorize("exams.create"), validate(v.validateId), c.archive);
 router.get("/:id/dmc", authorize("exams.read"), validate(v.validateDmc), c.dmc);
 router.get("/:id", authorize("exams.read"), validate(v.validateId), c.getById);
 router.get("/:id/visibility", override, validate(v.validateId), c.gateStatus);

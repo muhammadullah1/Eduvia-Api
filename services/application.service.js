@@ -117,6 +117,9 @@ async function list(
     where,
     include: [{ model: ApplicationDocuments, as: "documents" }],
     order: [["created_at", "DESC"], ["id", "DESC"]],
+    // Count applications, not application × document rows.
+    distinct: true,
+    col: "id",
     limit,
     offset,
   });
@@ -523,51 +526,68 @@ async function nextAdmissionNo(schoolId, transaction) {
   return `${head}${String(max + 1).padStart(width, "0")}`;
 }
 
+/**
+ * Link the guardian to the new student. With an email the guardian gets a
+ * parent-portal account (and an invitation); without one we keep a guardian
+ * record only, matched by phone so siblings share it.
+ */
 async function linkGuardian(schoolId, app, student, transaction) {
   const email = app.parentEmail && String(app.parentEmail).trim().toLowerCase();
-  if (!email) throw new ApiError(400, "Guardian email is required to enroll");
   const relation = RELATIONS.has(app.guardianRelation) ? app.guardianRelation : "Guardian";
-  let user = await Users.findOne({ where: { email, fkSchoolId: schoolId }, transaction });
+  const guardianName = String(app.parentName || "Guardian").trim();
+  const nameFields = {
+    guardianName,
+    ...(relation === "Father" ? { fatherName: guardianName } : {}),
+    ...(relation === "Mother" ? { motherName: guardianName } : {}),
+  };
   let parent;
   let createdUser = null;
-  if (user) {
-    if (user.role !== USER_ROLES.PARENT) {
-      throw new ApiError(409, "Guardian email belongs to a staff account");
-    }
-    parent = await Parents.findOne({ where: { fkUserId: user.id, fkSchoolId: schoolId }, transaction });
+  if (!email) {
+    parent = await Parents.findOne({
+      where: { fkSchoolId: schoolId, fkUserId: null, primaryContactNumber: app.parentPhone, guardianName },
+      transaction,
+    });
     if (!parent) {
       parent = await Parents.create(
-        { fkUserId: user.id, fkSchoolId: schoolId, primaryContactNumber: app.parentPhone },
+        { fkSchoolId: schoolId, fkUserId: null, primaryContactNumber: app.parentPhone, ...nameFields },
         { transaction },
       );
     }
   } else {
-    const parts = String(app.parentName || "Guardian").trim().split(/\s+/);
-    const hashed = await bcrypt.hash(crypto.randomBytes(18).toString("hex"), 10);
-    user = await Users.create(
-      {
-        fkSchoolId: schoolId,
-        firstName: parts[0] || "Guardian",
-        lastName: parts.slice(1).join(" ") || "-",
-        email,
-        phone: app.parentPhone,
-        password: hashed,
-        role: USER_ROLES.PARENT,
-        status: USER_STATUS.ACTIVE,
-      },
-      { transaction },
-    );
-    parent = await Parents.create(
-      {
-        fkUserId: user.id,
-        fkSchoolId: schoolId,
-        primaryContactNumber: app.parentPhone,
-        ...(relation === "Father" ? { fatherName: app.parentName } : {}),
-        ...(relation === "Mother" ? { motherName: app.parentName } : {}),
-      },
-      { transaction },
-    );
-    createdUser = user;
+    let user = await Users.findOne({ where: { email, fkSchoolId: schoolId }, transaction });
+    if (user) {
+      if (user.role !== USER_ROLES.PARENT) {
+        throw new ApiError(409, "Guardian email belongs to a staff account");
+      }
+      parent = await Parents.findOne({ where: { fkUserId: user.id, fkSchoolId: schoolId }, transaction });
+      if (!parent) {
+        parent = await Parents.create(
+          { fkUserId: user.id, fkSchoolId: schoolId, primaryContactNumber: app.parentPhone, guardianName },
+          { transaction },
+        );
+      }
+    } else {
+      const parts = guardianName.split(/\s+/);
+      const hashed = await bcrypt.hash(crypto.randomBytes(18).toString("hex"), 10);
+      user = await Users.create(
+        {
+          fkSchoolId: schoolId,
+          firstName: parts[0] || "Guardian",
+          lastName: parts.slice(1).join(" ") || "-",
+          email,
+          phone: app.parentPhone,
+          password: hashed,
+          role: USER_ROLES.PARENT,
+          status: USER_STATUS.ACTIVE,
+        },
+        { transaction },
+      );
+      parent = await Parents.create(
+        { fkUserId: user.id, fkSchoolId: schoolId, primaryContactNumber: app.parentPhone, ...nameFields },
+        { transaction },
+      );
+      createdUser = user;
+    }
   }
   await StudentParents.findOrCreate({
     where: { fkParentId: parent.id, fkStudentId: student.id },

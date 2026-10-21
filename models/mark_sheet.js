@@ -36,16 +36,31 @@ module.exports = (sequelize, DataTypes) => {
         field: "fk_subject_id",
       },
       totalMarks: {
-        type: DataTypes.DECIMAL(5, 2),
+        type: DataTypes.DECIMAL(6, 2),
         allowNull: false,
         defaultValue: 100.0,
         field: "total_marks",
       },
       passingMarks: {
-        type: DataTypes.DECIMAL(5, 2),
+        type: DataTypes.DECIMAL(6, 2),
         allowNull: false,
         defaultValue: 40.0,
         field: "passing_marks",
+      },
+      paperDate: {
+        type: DataTypes.DATEONLY,
+        allowNull: true,
+        field: "paper_date",
+      },
+      startTime: {
+        type: DataTypes.TIME,
+        allowNull: true,
+        field: "start_time",
+      },
+      endTime: {
+        type: DataTypes.TIME,
+        allowNull: true,
+        field: "end_time",
       },
       status: {
         type: DataTypes.ENUM("Draft", "Submitted", "Verified", "Published"),

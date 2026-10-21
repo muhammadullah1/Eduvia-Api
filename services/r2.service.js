@@ -60,8 +60,9 @@ const ALLOWED_TYPES = new Set([
 
 const MAX_BYTES = 10 * 1024 * 1024;
 
-async function createPresignedUpload({ key, contentType }) {
-  if (!ALLOWED_TYPES.has(contentType)) {
+async function createPresignedUpload({ key, contentType, allowedTypes, maxBytes }) {
+  const types = allowedTypes || ALLOWED_TYPES;
+  if (!types.has(contentType)) {
     throw new ApiError(400, "File type not allowed. Use PDF, JPEG, PNG, or WebP.");
   }
   const cfg = r2Config();
@@ -75,7 +76,7 @@ async function createPresignedUpload({ key, contentType }) {
   return {
     uploadUrl,
     fileUrl: publicUrlForKey(key),
-    maxBytes: MAX_BYTES,
+    maxBytes: maxBytes || MAX_BYTES,
   };
 }
 

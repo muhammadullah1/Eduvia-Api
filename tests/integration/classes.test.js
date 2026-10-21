@@ -2,7 +2,6 @@
 
 const classService = require("../../services/class.service");
 const { sequelize, Schools, AcademicSessions, Classes } = require("../../models");
-const { USER_ROLES } = require("../../constants");
 
 async function buildFixture() {
   const stamp = Date.now();

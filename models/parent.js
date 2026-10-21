@@ -17,9 +17,14 @@ module.exports = (sequelize, DataTypes) => {
       },
       fkUserId: {
         type: DataTypes.INTEGER,
-        allowNull: false,
+        allowNull: true,
         unique: true,
         field: "fk_user_id",
+      },
+      guardianName: {
+        type: DataTypes.STRING(100),
+        allowNull: true,
+        field: "guardian_name",
       },
       fatherName: {
         type: DataTypes.STRING(100),
