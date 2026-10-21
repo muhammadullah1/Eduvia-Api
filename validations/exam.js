@@ -73,7 +73,7 @@ module.exports = {
   validateDocument: {
     params: Joi.object({
       id: id.required(),
-      kind: Joi.string().valid("result-sheet", "mark-sheet", "class-report", "overall").required(),
+      kind: Joi.string().valid("dmc", "result-sheet", "mark-sheet", "class-report", "overall").required(),
     }),
     query: Joi.object({
       classId: id,

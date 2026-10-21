@@ -41,7 +41,7 @@ async function listSchedules(schoolId, { classId, subjectId } = {}) {
   return DailyTestSchedules.findAll({ where, include: scheduleInclude, order: [["fkClassId", "ASC"], ["fkSubjectId", "ASC"]] });
 }
 
-async function saveSchedule(actor, { classId, subjectId, weekday, periodIndex, maxScore }) {
+async function saveSchedule(actor, { classId, subjectId, weekday, maxScore }) {
   const [klass, subject] = await Promise.all([
     Classes.findOne({ where: { id: classId, fkSchoolId: actor.schoolId } }),
     Subjects.findOne({ where: { id: subjectId, fkSchoolId: actor.schoolId } }),
@@ -61,7 +61,6 @@ async function saveSchedule(actor, { classId, subjectId, weekday, periodIndex, m
       `${subject.name} is not on the ${weekday} timetable for ${klass.label}.`
     );
   }
-  if (periodIndex && periodIndex > klass.periodCount) throw new ApiError(400, `${klass.label} only has ${klass.periodCount} periods.`);
   const values = { weekday, maxScore: maxScore || 20 };
   const existing = await DailyTestSchedules.findOne({
     where: { fkClassId: klass.id, fkSubjectId: subject.id, dayOfWeek: weekday },
@@ -93,8 +92,8 @@ async function generateMonth(actor, { month, classId }) {
         fkClassId: schedule.fkClassId,
         fkSubjectId: schedule.fkSubjectId,
         day: schedule.weekday,
-        ...(schedule.periodIndex && { periodIndex: schedule.periodIndex }),
       },
+      order: [["periodIndex", "ASC"]],
     });
     for (const date of datesForWeekday(month, schedule.weekday)) {
       const [test, isNew] = await DailyTests.findOrCreate({
@@ -146,11 +145,22 @@ async function list(user, filters = {}) {
       studentFilter = { fkStudentId: { [Op.in]: studentIds } };
     }
   }
+  const where = await scopeWhere(user, filters);
+  if (filters.month) where.month = filters.month;
+  if (filters.status) where.status = filters.status;
+  // Parents only ever see published tests, so unpublished marks never leak.
+  if (user.role === USER_ROLES.PARENT) where.status = DAILY_TEST_STATUS.PUBLISHED;
   return DailyTests.findAll({
-    where: await scopeWhere(user, filters),
+    where,
     include: [
       ...scheduleInclude,
-      { model: DailyTestResults, as: "results", required: false, where: studentFilter, attributes: ["fkStudentId", "obtainedMarks"] },
+      {
+        model: DailyTestResults,
+        as: "results",
+        required: false,
+        where: studentFilter,
+        attributes: ["fkStudentId", "obtainedMarks", "isAbsent"],
+      },
     ],
     order: [["date", "ASC"]],
   });
@@ -173,18 +183,20 @@ async function saveMarks(user, id, marks) {
   const inClass = new Set(students.map((s) => s.id));
   for (const mark of marks) {
     if (!inClass.has(mark.studentId)) throw new ApiError(400, `Student ${mark.studentId} is not in this class.`);
+    if (mark.absent && mark.score != null) throw new ApiError(400, "An absent student cannot also have a score.");
     if (mark.score != null && (mark.score < 0 || mark.score > Number(test.maxScore))) {
       throw new ApiError(400, `Scores must be between 0 and ${Number(test.maxScore)}.`);
     }
   }
   await sequelize.transaction(async (transaction) => {
     for (const mark of marks) {
+      const values = { score: mark.absent ? null : mark.score, isAbsent: Boolean(mark.absent), fkEnteredByUserId: user.id };
       const [row] = await DailyTestResults.findOrCreate({
         where: { fkDailyTestId: test.id, fkStudentId: mark.studentId },
-        defaults: { score: mark.score, fkEnteredByUserId: user.id },
+        defaults: values,
         transaction,
       });
-      await row.update({ score: mark.score, fkEnteredByUserId: user.id }, { transaction });
+      await row.update(values, { transaction });
     }
     await test.update({ status: DAILY_TEST_STATUS.MARKS_ENTERED }, { transaction });
   });
@@ -218,8 +230,11 @@ async function recompute(actor, { classId, subjectId, month }) {
     attributes: ["id"],
   });
   for (const student of students) {
+    // Absent counts as a failed test (score 0); a missing mark stays pending.
     const marks = tests.flatMap((t) =>
-      t.results.filter((r) => r.fkStudentId === student.id).map((r) => ({ score: r.score, maxScore: t.maxScore })),
+      t.results
+        .filter((r) => r.fkStudentId === student.id)
+        .map((r) => ({ score: r.isAbsent ? 0 : r.score, maxScore: t.maxScore })),
     );
     const outcome = summarizeMonth(marks, tests.length, rules);
     const key = { fkStudentId: student.id, fkClassId: classId, fkSubjectId: subjectId, month };
@@ -269,12 +284,24 @@ async function monthlySummary(user, { classId, subjectId, month, studentId }) {
         weekOfMonth: t.weekOfMonth,
         maxScore: Number(t.maxScore),
         score: result && result.score != null ? Number(result.score) : null,
-        passed: result ? isPassedScore(result.score, t.maxScore, rules.passPercent) : null,
+        absent: Boolean(result && result.isAbsent),
+        passed: result ? (result.isAbsent ? false : isPassedScore(result.score, t.maxScore, rules.passPercent)) : null,
       });
     }
-    return [...bySubject.values()].map((entry) => ({
+    // Judge against every test scheduled this month, not just the published
+    // ones, so a month is not "Passed" before its last test.
+    const scheduled = await DailyTests.count({
+      where: { fkSchoolId: user.schoolId, fkClassId: student.fkClassId, month, ...(subjectId && { fkSubjectId: subjectId }) },
+      group: ["fkSubjectId"],
+    });
+    const scheduledBySubject = new Map(scheduled.map((row) => [Number(row.fkSubjectId), Number(row.count)]));
+    return [...bySubject.entries()].map(([fkSubjectId, entry]) => ({
       ...entry,
-      outcome: summarizeMonth(entry.tests, entry.tests.length, rules),
+      outcome: summarizeMonth(
+        entry.tests.map((test) => ({ ...test, score: test.absent ? 0 : test.score })),
+        scheduledBySubject.get(Number(fkSubjectId)) || entry.tests.length,
+        rules,
+      ),
     }));
   }
 
@@ -296,6 +323,7 @@ async function monthlySummary(user, { classId, subjectId, month, studentId }) {
         const r = t.results.find((x) => x.fkStudentId === s.id);
         return r && r.score != null ? Number(r.score) : null;
       }),
+      absent: tests.map((t) => Boolean(t.results.find((x) => x.fkStudentId === s.id && x.isAbsent))),
       summary: byStudent.get(s.id) || null,
     })),
   };

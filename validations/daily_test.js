@@ -30,7 +30,7 @@ module.exports = {
     ...idParam,
     body: Joi.object({
       marks: Joi.array()
-        .items(Joi.object({ studentId: id.required(), score: Joi.number().min(0).allow(null).required() }))
+        .items(Joi.object({ studentId: id.required(), score: Joi.number().min(0).allow(null).required(), absent: Joi.boolean() }))
         .min(1)
         .required(),
     }),

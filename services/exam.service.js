@@ -13,6 +13,8 @@ const {
   AcademicSessions,
   TimetableSlots,
   Users,
+  Schools,
+  Parents,
   sequelize,
 } = require("../models");
 const { USER_ROLES, SHEET_STATUS, RESULT_FEE_RULES, SETTING_KEYS, STUDENT_STATUS, GRADE_BANDS, FAIL_GRADE } = require("../constants");
@@ -620,15 +622,20 @@ function overallOutcome(papers) {
   };
 }
 
-/** Published result for one student. Rank is omitted until a tie policy exists. */
+/**
+ * Detailed marks certificate. Parents see published sheets only, and only
+ * when the fee visibility rule (or an override) lets them. Staff can preview
+ * in-progress marks; the result is then flagged as provisional.
+ */
 async function dmc(user, examId, studentId) {
   const student = await accessService.assertStudentAccess(user, studentId);
+  const isParent = user.role === USER_ROLES.PARENT;
   const exam = await Exams.findOne({
     where: { id: examId, fkSchoolId: user.schoolId },
     include: [{
       model: MarkSheets,
       as: "sheets",
-      where: { status: SHEET_STATUS.PUBLISHED },
+      where: isParent ? { status: SHEET_STATUS.PUBLISHED } : { fkClassId: student.fkClassId },
       required: false,
       include: [
         { model: Subjects, as: "subject", attributes: ["id", "name"] },
@@ -637,23 +644,42 @@ async function dmc(user, examId, studentId) {
     }],
   });
   if (!exam) throw new ApiError(404, "Exam not found");
-  if (user.role === USER_ROLES.PARENT) {
+  if (isParent) {
     const { feeRule } = await settingsService.get(user.schoolId, SETTING_KEYS.RESULT_VISIBILITY);
     const gate = await visibility(user.schoolId, exam, student.id, feeRule);
     if (!gate.visible) throw new ApiError(403, "Result withheld until fees are cleared. Please contact the school office.");
   }
-  let sheets = exam.sheets || [];
+  let sheets = (exam.sheets || []).filter((sheet) => sheet.fkClassId === student.fkClassId);
   if (user.role === USER_ROLES.TEACHER) {
     const teacher = await accessService.teacherFor(user);
     const classIds = await accessService.teacherClassIds(teacher);
     if (!classIds.includes(student.fkClassId)) throw new ApiError(403, "You can only open results for your own classes.");
     sheets = sheets.filter((sheet) => sheet.fkSubjectId === teacher.fkSubjectId);
   }
-  if (!sheets.length) throw new ApiError(404, "No published result for this student");
+  if (!sheets.length) throw new ApiError(404, isParent ? "No published result for this student" : "This student has no papers in this exam.");
+  sheets.sort((a, b) => String(a.subject ? a.subject.name : "").localeCompare(String(b.subject ? b.subject.name : "")));
   const papers = sheets.map((sheet) => paperOutcome(sheet, sheet.rows[0]));
   const overall = overallOutcome(papers);
+  const standing = await buildResults(user, examId, { classId: student.fkClassId, publishedOnly: isParent });
+  const own = standing.rows.find((row) => row.studentId === student.id);
+  const profile = await Students.findOne({
+    where: { id: student.id },
+    include: [
+      { model: Classes, as: "class", attributes: ["id", "grade", "section", "label"] },
+      { model: Parents, as: "parents", attributes: ["guardianName", "fatherName", "primaryContactNumber"], through: { attributes: ["isPrimary"] } },
+    ],
+  });
+  const guardian = (profile.parents || []).find((parent) => parent.StudentParents && parent.StudentParents.isPrimary) || (profile.parents || [])[0];
   return {
-    student: { id: student.id, name: `${student.firstName} ${student.lastName}`, admissionNo: student.admissionNo },
+    student: {
+      id: student.id,
+      name: `${student.firstName} ${student.lastName}`.trim(),
+      admissionNo: student.admissionNo,
+      className: profile.class ? classLabel(profile.class) : null,
+      guardian: guardian ? guardian.guardianName || guardian.fatherName : null,
+      dateOfBirth: profile.dateOfBirth || null,
+      gender: profile.gender || null,
+    },
     exam: { id: exam.id, name: exam.name },
     subjects: papers.map((paper) => ({
       subject: paper.subject,
@@ -663,13 +689,17 @@ async function dmc(user, examId, studentId) {
       absent: paper.status === "Absent",
       exempt: paper.status === "Exempt",
       result: paper.status,
-      grade: paper.obtained == null ? null : gradeFor(percentOf(paper.obtained, paper.total), paper.status === "Pass"),
+      grade: paper.obtained == null || paper.status === "Absent" ? null : gradeFor(percentOf(paper.obtained, paper.total), paper.status === "Pass"),
     })),
     total: overall.obtained,
     max: overall.total,
     percentage: overall.percentage,
     grade: overall.grade,
+    result: overall.result,
     passed: overall.passed,
+    classRank: own ? own.classRank : null,
+    classSize: standing.rows.length,
+    provisional: sheets.some((sheet) => sheet.status !== SHEET_STATUS.PUBLISHED),
   };
 }
 
@@ -741,6 +771,7 @@ async function listSummaries(user, { sessionId } = {}) {
         startDate: plain.startDate,
         endDate: plain.endDate,
         status: plain.status,
+        phase: examPhase(plain),
         feeMonth: plain.requiredFeeMonth,
         classes: classes.map((klass) => ({ id: klass.id, label: classLabel(klass) })),
         sheets: sheets.map(sheetProgress),
@@ -750,6 +781,64 @@ async function listSummaries(user, { sessionId } = {}) {
 }
 
 const LOCKED_EXAM = ["Published", "Finalised", "Archived"];
+
+/**
+ * Where an exam sits in its lifecycle, from its dates and status:
+ * - upcoming: not started yet; fully editable and deletable.
+ * - ongoing:  between start and end date; limited edits, no delete.
+ * - past:     ended, or results finalised/published; archive only.
+ */
+function examPhase(exam, on = today()) {
+  if (LOCKED_EXAM.includes(exam.status)) return "past";
+  if (exam.endDate && exam.endDate < on) return "past";
+  if (exam.startDate && exam.startDate <= on) return "ongoing";
+  return "upcoming";
+}
+
+const PHASE_MESSAGES = {
+  pastEdit: "This exam has ended, so it can no longer be edited. Archive it instead.",
+  pastDelete: "This exam has ended, so it cannot be deleted. Archive it instead.",
+  ongoingDelete: "This exam is in progress, so it cannot be deleted.",
+  ongoingType: "The exam type cannot change while the exam is in progress.",
+  ongoingStart: "The start date cannot change while the exam is in progress.",
+  ongoingEnd: "While the exam is in progress the end date can only be extended.",
+  ongoingRemove: "Papers cannot be removed while the exam is in progress.",
+  ongoingChange: "Existing papers cannot be changed while the exam is in progress. Only new papers can be added.",
+  ongoingPastPaper: "A new paper must be dated today or later.",
+};
+
+function samePaper(sheet, marks) {
+  const time = (value) => (value ? String(value).slice(0, 5) : null);
+  return Number(sheet.totalMarks) === marks.total
+    && Number(sheet.passingMarks) === marks.passing
+    && (sheet.paperDate || null) === marks.paperDate
+    && time(sheet.startTime) === marks.startTime
+    && time(sheet.endTime) === marks.endTime;
+}
+
+/** Ongoing exams: rename, extend the end date, or add papers dated today or later. */
+function assertOngoingEdit(exam, body, plan) {
+  if (body.examType && body.examType !== exam.examType) throw new ApiError(409, PHASE_MESSAGES.ongoingType);
+  if (body.startDate !== undefined && body.startDate !== exam.startDate) throw new ApiError(409, PHASE_MESSAGES.ongoingStart);
+  if (body.endDate !== undefined && (!body.endDate || (exam.endDate && body.endDate < exam.endDate))) {
+    throw new ApiError(409, PHASE_MESSAGES.ongoingEnd);
+  }
+  if (!plan) return;
+  const planned = new Map();
+  for (const item of plan) {
+    for (const paper of item.subjects) planned.set(`${item.klass.id}:${paper.subject.id}`, paper.marks);
+  }
+  for (const sheet of exam.markSheets || []) {
+    const marks = planned.get(`${sheet.fkClassId}:${sheet.fkSubjectId}`);
+    if (!marks) throw new ApiError(409, PHASE_MESSAGES.ongoingRemove);
+    if (!samePaper(sheet, marks)) throw new ApiError(409, PHASE_MESSAGES.ongoingChange);
+    planned.delete(`${sheet.fkClassId}:${sheet.fkSubjectId}`);
+  }
+  const on = today();
+  for (const marks of planned.values()) {
+    if (!marks.paperDate || marks.paperDate < on) throw new ApiError(409, PHASE_MESSAGES.ongoingPastPaper);
+  }
+}
 
 function hasMarks(sheet) {
   return (sheet.rows || []).some((row) => row.score != null || row.isAbsent || row.isExempt);
@@ -768,10 +857,9 @@ async function updateExam(actor, id, body) {
     include: [{ model: MarkSheets, as: "markSheets", include: [{ model: MarkSheetRows, as: "rows" }] }],
   });
   if (!exam) throw new ApiError(404, "Exam not found");
-  if (LOCKED_EXAM.includes(exam.status)) {
-    throw new ApiError(400, "This exam is locked. Reopen its mark sheets before editing.");
-  }
-  if ((exam.markSheets || []).some((sheet) => sheet.status !== SHEET_STATUS.DRAFT)) {
+  const phase = examPhase(exam);
+  if (phase === "past") throw new ApiError(409, PHASE_MESSAGES.pastEdit);
+  if (phase === "upcoming" && (exam.markSheets || []).some((sheet) => sheet.status !== SHEET_STATUS.DRAFT)) {
     throw new ApiError(400, "Submitted mark sheets must be reopened before the exam can be edited.");
   }
   if (body.sessionId != null && Number(body.sessionId) !== Number(exam.fkSessionId)) {
@@ -787,6 +875,7 @@ async function updateExam(actor, id, body) {
   const plan = Array.isArray(body.papers)
     ? await planPapers(actor, exam.fkSessionId, body.papers, { startDate, endDate })
     : null;
+  if (phase === "ongoing") assertOngoingEdit(exam, body, plan);
   await sequelize.transaction(async (transaction) => {
     await exam.update(
       {
@@ -841,9 +930,9 @@ async function removeExam(actor, id) {
     include: [{ model: MarkSheets, as: "markSheets" }],
   });
   if (!exam) throw new ApiError(404, "Exam not found");
-  if (LOCKED_EXAM.includes(exam.status)) {
-    throw new ApiError(409, "A finalised or published exam cannot be deleted. Archive it instead.");
-  }
+  const phase = examPhase(exam);
+  if (phase === "past") throw new ApiError(409, PHASE_MESSAGES.pastDelete);
+  if (phase === "ongoing") throw new ApiError(409, PHASE_MESSAGES.ongoingDelete);
   if ((exam.markSheets || []).some((sheet) => sheet.status !== SHEET_STATUS.DRAFT)) {
     throw new ApiError(400, "Reopen submitted mark sheets before deleting this exam.");
   }
@@ -861,8 +950,8 @@ async function archiveExam(actor, id) {
   const exam = await Exams.findOne({ where: { id, fkSchoolId: actor.schoolId } });
   if (!exam) throw new ApiError(404, "Exam not found");
   if (exam.status === "Archived") return getExam(actor, exam.id);
-  if (!["Published", "Finalised"].includes(exam.status)) {
-    throw new ApiError(400, "Only a finalised or published exam can be archived. Delete a draft exam instead.");
+  if (examPhase(exam) !== "past") {
+    throw new ApiError(409, "Only an exam that has ended can be archived. Delete or edit an upcoming exam instead.");
   }
   await exam.update({ status: "Archived" });
   await auditService.record(actor, `archived exam ${exam.name}`, { entityType: "exam", entityId: exam.id });
@@ -893,7 +982,31 @@ function rankValue(items, scoreOf, tie) {
  * Results for one class: either one paper (subjectId) or every paper with an
  * overall Pass/Fail per student. Ranks are within the class only.
  */
-async function results(user, examId, { classId, subjectId } = {}) {
+/** Class-wide results are staff documents; parents only ever get their own child's DMC. */
+async function results(user, examId, query = {}) {
+  if (user.role === USER_ROLES.PARENT) throw new ApiError(403, "Class results are available to school staff only.");
+  return buildResults(user, examId, query);
+}
+
+/** Per-paper summary used by the class and overall reports. */
+function paperStats(sheet, papers) {
+  const scored = papers.filter((paper) => paper.status === "Pass" || paper.status === "Fail");
+  const marks = scored.map((paper) => paper.obtained);
+  return {
+    subjectId: sheet.fkSubjectId,
+    subject: sheet.subject ? sheet.subject.name : "Subject",
+    sat: scored.length,
+    passed: papers.filter((paper) => paper.status === "Pass").length,
+    failed: papers.filter((paper) => paper.status === "Fail" || paper.status === "Absent").length,
+    absent: papers.filter((paper) => paper.status === "Absent").length,
+    exempt: papers.filter((paper) => paper.status === "Exempt").length,
+    highest: marks.length ? Math.max(...marks) : null,
+    lowest: marks.length ? Math.min(...marks) : null,
+    average: marks.length ? Math.round((marks.reduce((a, b) => a + b, 0) / marks.length) * 100) / 100 : null,
+  };
+}
+
+async function buildResults(user, examId, { classId, subjectId, publishedOnly = false } = {}) {
   const exam = await Exams.findOne({
     where: { id: examId, fkSchoolId: user.schoolId },
     include: [
@@ -919,6 +1032,7 @@ async function results(user, examId, { classId, subjectId } = {}) {
     : (sortClasses(sheets.map((sheet) => sheet.class).filter(Boolean))[0] || {}).id;
   sheets = sheets.filter((sheet) => sheet.fkClassId === targetClassId);
   if (subjectId) sheets = sheets.filter((sheet) => sheet.fkSubjectId === Number(subjectId));
+  if (publishedOnly) sheets = sheets.filter((sheet) => sheet.status === SHEET_STATUS.PUBLISHED);
   if (!sheets.length) throw new ApiError(404, "No mark sheet matches that exam, class, and subject.");
   sheets.sort((a, b) => String(a.subject ? a.subject.name : "").localeCompare(String(b.subject ? b.subject.name : "")));
   const { feeRule, rankTie } = await settingsService.get(user.schoolId, SETTING_KEYS.RESULT_VISIBILITY);
@@ -955,7 +1069,12 @@ async function results(user, examId, { classId, subjectId } = {}) {
       grade: row.grade,
       result: row.result,
       failedPapers: row.failedPapers,
-      papers: row.papers.map((paper) => ({ subjectId: paper.subjectId, obtained: paper.obtained, status: paper.status })),
+      papers: row.papers.map((paper) => ({
+        subjectId: paper.subjectId,
+        obtained: paper.obtained,
+        status: paper.status,
+        grade: paper.obtained == null || paper.status === "Absent" ? null : gradeFor(percentOf(paper.obtained, paper.total), paper.status === "Pass"),
+      })),
       classRank: ranks.get(index) ?? null,
       visibility: published && gate.visible ? (gate.overridden && !gate.feeCleared ? "override" : "visible") : gate.overridden ? "override" : "hidden",
       overrideId: gate.override ? gate.override.id : null,
@@ -980,7 +1099,34 @@ async function results(user, examId, { classId, subjectId } = {}) {
     sheetStatus: single ? single.status : null,
     rankTie: rankTie || "shared",
     feeRule,
+    provisional: sheets.some((sheet) => sheet.status !== SHEET_STATUS.PUBLISHED),
+    paperStats: sheets.map((sheet, index) => paperStats(sheet, rows.map((row) => row.papers[index]))),
     rows: decorated,
+  };
+}
+
+/** Header details every printed exam document carries. */
+async function documentMeta(user, examId) {
+  const exam = await Exams.findOne({
+    where: { id: examId, fkSchoolId: user.schoolId },
+    include: [
+      { model: Schools, as: "school", attributes: ["id", "name"] },
+      { model: AcademicSessions, as: "session", attributes: ["id", "name"] },
+    ],
+  });
+  if (!exam) throw new ApiError(404, "Exam not found");
+  return {
+    school: { name: exam.school ? exam.school.name : "School" },
+    session: exam.session ? exam.session.name : null,
+    exam: {
+      id: exam.id,
+      name: exam.name,
+      examType: exam.examType,
+      status: exam.status,
+      startDate: exam.startDate || null,
+      endDate: exam.endDate || null,
+    },
+    generatedAt: new Date().toISOString(),
   };
 }
 
@@ -1036,6 +1182,8 @@ module.exports = {
   updateRows,
   transition,
   results,
+  documentMeta,
+  examPhase,
   advance,
   parentResults,
   gateStatus,

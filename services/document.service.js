@@ -4,6 +4,7 @@ const examService = require("./exam.service");
 const feeService = require("./fee.service");
 const ApiError = require("../utils/ApiError");
 const { textPdf } = require("../utils/pdf");
+const { USER_ROLES } = require("../constants");
 
 function dmcLines(dmc) {
   return [
@@ -48,7 +49,32 @@ function resultLines(title, data) {
   ];
 }
 
+const DOCUMENT_TITLES = {
+  dmc: "Detailed marks certificate",
+  "result-sheet": "Result sheet",
+  "mark-sheet": "Mark sheet",
+  "class-report": "Class result report",
+  overall: "Overall examination report",
+};
+
+/**
+ * Data for the five printable exam documents. JSON responses carry a `meta`
+ * block (school, session, exam dates) so the client can render the header.
+ * Parents may only open their own child's DMC, which applies the fee gate.
+ */
 async function examDocument(user, kind, examId, query) {
+  if (!DOCUMENT_TITLES[kind]) throw new ApiError(400, "Unknown document type.");
+  if (kind === "dmc") {
+    if (!query.studentId) throw new ApiError(400, "Choose a student for the DMC.");
+    if (query.format === "pdf") return dmcPdf(user, examId, query.studentId);
+    const [meta, data] = await Promise.all([
+      examService.documentMeta(user, examId),
+      examService.dmc(user, examId, query.studentId),
+    ]);
+    return { kind, title: DOCUMENT_TITLES[kind], meta, ...data };
+  }
+  if (user.role === USER_ROLES.PARENT) throw new ApiError(403, "Class documents are available to school staff only.");
+  const meta = await examService.documentMeta(user, examId);
   if (kind === "overall") {
     // Ranks are per class, so the overall report is one block per class.
     const summary = await examService.listSummaries(user, {});
@@ -62,7 +88,7 @@ async function examDocument(user, kind, examId, query) {
     if (query.format === "pdf") {
       return textPdf(["Overall examination report", ...blocks.flatMap((data) => resultLines("", data).slice(1))]);
     }
-    return { classes: blocks };
+    return { kind, title: DOCUMENT_TITLES[kind], meta, classes: blocks };
   }
   if (!query.classId) throw new ApiError(400, "Choose a class for this document.");
   if (kind === "mark-sheet" && !query.subjectId) throw new ApiError(400, "Choose a subject for the mark sheet.");
@@ -70,13 +96,8 @@ async function examDocument(user, kind, examId, query) {
     classId: query.classId,
     subjectId: kind === "mark-sheet" ? query.subjectId : undefined,
   });
-  const titles = {
-    "result-sheet": "Result sheet",
-    "mark-sheet": "Mark sheet",
-    "class-report": "Class result report",
-  };
-  if (query.format === "pdf") return textPdf(resultLines(titles[kind] || "Examination document", data));
-  return data;
+  if (query.format === "pdf") return textPdf(resultLines(DOCUMENT_TITLES[kind], data));
+  return { kind, title: DOCUMENT_TITLES[kind], meta, ...data };
 }
 
 module.exports = { dmcPdf, receiptPdf, examDocument };

@@ -119,6 +119,14 @@ module.exports = (sequelize, DataTypes) => {
       foreignKey: "fkStudentId",
       as: "student",
     });
+    MonthlyStudentSummary.belongsTo(models.Subjects, {
+      foreignKey: "fkSubjectId",
+      as: "subject",
+    });
+    MonthlyStudentSummary.belongsTo(models.Classes, {
+      foreignKey: "fkClassId",
+      as: "class",
+    });
   };
 
   return MonthlyStudentSummary;
