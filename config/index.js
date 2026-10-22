@@ -131,6 +131,12 @@ const config = convict({
       env: "CLOUDFLARE_R2_PUBLIC_BASE_URL",
     },
   },
+  allowedOrigins: {
+    doc: "Comma-separated browser origins allowed by CORS (with credentials)",
+    format: String,
+    default: "http://localhost:5173,http://localhost:5174",
+    env: "ALLOWED_ORIGINS",
+  },
 });
 
 const env = config.get("env");

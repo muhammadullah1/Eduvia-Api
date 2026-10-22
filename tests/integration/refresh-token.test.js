@@ -56,10 +56,33 @@ describe("refresh tokens", () => {
     expect(old.replacedById).not.toBeNull();
   });
 
-  test("reusing a rotated token revokes the whole family", async () => {
+  test("two clients refreshing with the same token at once both succeed (grace window)", async () => {
+    const { raw, row } = await refreshTokens.issue(user.id);
+    const [a, b] = await Promise.all([refresh(raw), refresh(raw)]);
+    expect([a.status, b.status]).toEqual([200, 200]);
+    const ca = cookieFrom(a);
+    const cb = cookieFrom(b);
+    expect(ca).not.toBe(cb);
+    // Both new tokens keep working; the family is intact.
+    expect((await refresh(ca)).status).toBe(200);
+    expect((await refresh(cb)).status).toBe(200);
+    expect(await RefreshTokens.count({ where: { familyId: row.familyId, revokedAt: null } })).toBe(2);
+  });
+
+  test("the grace is single-use: a third presentation is reuse", async () => {
+    const { raw, row } = await refreshTokens.issue(user.id);
+    expect((await refresh(raw)).status).toBe(200);
+    expect((await refresh(raw)).status).toBe(200);
+    expect((await refresh(raw)).status).toBe(401);
+    expect(await RefreshTokens.count({ where: { familyId: row.familyId, revokedAt: null } })).toBe(0);
+  });
+
+  test("reusing a rotated token after the grace window revokes the whole family", async () => {
     const { raw, row } = await refreshTokens.issue(user.id);
     const first = await refresh(raw);
     const rotated = cookieFrom(first);
+    const past = new Date(Date.now() - refreshTokens.ROTATION_GRACE_MS - 1000);
+    await RefreshTokens.update({ revokedAt: past }, { where: { tokenHash: refreshTokens.hash(raw) } });
     expect((await refresh(raw)).status).toBe(401);
     expect((await refresh(rotated)).status).toBe(401);
     const live = await RefreshTokens.count({ where: { familyId: row.familyId, revokedAt: null } });

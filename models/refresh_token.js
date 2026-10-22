@@ -11,6 +11,7 @@ module.exports = (sequelize, DataTypes) => {
       expiresAt: { type: DataTypes.DATE, allowNull: false, field: "expires_at" },
       revokedAt: { type: DataTypes.DATE, allowNull: true, field: "revoked_at" },
       replacedById: { type: DataTypes.INTEGER, allowNull: true, field: "replaced_by_id" },
+      graceUsedAt: { type: DataTypes.DATE, allowNull: true, field: "grace_used_at" },
     },
     { timestamps: true, underscored: true },
   );

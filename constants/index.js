@@ -182,4 +182,8 @@ exports.FAIL_GRADE = "F";
 
 exports.WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
-exports.ALLOWED_ORIGINS = ["http://localhost:5173", "http://localhost:5174"];
+/** CORS allow-list; set ALLOWED_ORIGINS (comma-separated) per environment. */
+exports.ALLOWED_ORIGINS = String(require("../config").get("allowedOrigins"))
+  .split(",")
+  .map((origin) => origin.trim().replace(/\/+$/, ""))
+  .filter(Boolean);

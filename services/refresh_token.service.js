@@ -9,6 +9,12 @@ const ApiError = require("../utils/ApiError");
 
 const ACCESS_TOKEN_TTL = "15m";
 const REFRESH_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+/**
+ * Two tabs (or a retried request) can present the same token at once. For a
+ * short window after rotation the previous token is accepted once more and
+ * gets its own fresh pair in the same family; after that it counts as reuse.
+ */
+const ROTATION_GRACE_MS = 45 * 1000;
 const COOKIE_NAME = "eduvia_refresh";
 
 const hash = (raw) => crypto.createHash("sha256").update(raw).digest("hex");
@@ -54,8 +60,21 @@ async function rotate(raw) {
     });
     if (!current) return { error: invalid() };
     if (current.revokedAt) {
-      await revokeFamily(current.familyId, transaction);
-      return { error: invalid() };
+      const withinGrace =
+        current.replacedById &&
+        !current.graceUsedAt &&
+        Date.now() - new Date(current.revokedAt).getTime() <= ROTATION_GRACE_MS;
+      if (!withinGrace) {
+        await revokeFamily(current.familyId, transaction);
+        return { error: invalid() };
+      }
+      const successor = await RefreshTokens.findByPk(current.replacedById, { transaction });
+      const user = successor && !successor.revokedAt ? await Users.findByPk(current.fkUserId, { transaction }) : null;
+      // A revoked successor means logout or theft handling already ran.
+      if (!user || user.status === USER_STATUS.BLOCK) return { error: invalid() };
+      const sibling = await issue(user.id, current.familyId, transaction);
+      await current.update({ graceUsedAt: new Date() }, { transaction });
+      return { refreshToken: sibling.raw, token: accessTokenFor(user) };
     }
     if (current.expiresAt <= new Date()) {
       await current.update({ revokedAt: new Date() }, { transaction });
@@ -101,6 +120,7 @@ function clearCookieOptions() {
 }
 
 module.exports = {
+  ROTATION_GRACE_MS,
   clearCookieOptions,
   ACCESS_TOKEN_TTL,
   REFRESH_TTL_MS,

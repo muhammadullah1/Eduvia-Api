@@ -44,9 +44,11 @@ function enrolledCount(classId, transaction) {
  * inside the transaction that moved students in or out.
  */
 async function syncClassStatus(classIds, transaction) {
-  const ids = [...new Set([].concat(classIds).filter(Boolean).map(Number))];
+  const ids = [...new Set([].concat(classIds).filter(Boolean).map(Number))].sort((a, b) => a - b);
   for (const id of ids) {
-    const row = await Classes.findByPk(id, { transaction });
+    // Row lock (in id order) so concurrent moves out of one class count after each
+    // other. NO KEY UPDATE doesn't clash with the FK share locks student writes take.
+    const row = await Classes.findByPk(id, { transaction, lock: transaction ? transaction.LOCK.NO_KEY_UPDATE : undefined });
     if (!row || row.status === "Archived") continue;
     const next = (await enrolledCount(id, transaction)) > 0 ? "Active" : "Inactive";
     if (row.status !== next) await row.update({ status: next }, { transaction });

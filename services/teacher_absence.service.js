@@ -311,6 +311,24 @@ async function markAbsentWithCover(actor, { teacherId, date, periods, notes, ass
   return { absences: rows, assigned: picked.size };
 }
 
+/**
+ * Releases the live cover of one absence (one period): marked Cancelled, then
+ * soft-deleted so the substitute is free for that period again. Other
+ * absences' covers are never touched.
+ */
+async function releaseCover(actor, absence, reason, transaction) {
+  const cover = await activeSubstitutionFor(absence.id, transaction);
+  if (!cover) return null;
+  await cover.update({ status: "Cancelled" }, { transaction });
+  await cover.destroy({ transaction });
+  await auditService.record(actor, `released substitute for absence #${absence.id} (${reason})`, {
+    entityType: "substitute_assignment",
+    entityId: cover.id,
+    metadata: { absenceId: absence.id, substituteTeacherId: cover.fkSubstituteTeacherId, date: cover.date, periodIndex: cover.periodIndex },
+  }, { transaction });
+  return cover;
+}
+
 async function removeSubstitute(actor, absenceId) {
   await sequelize.transaction(async (transaction) => {
     const absence = await TeacherAbsences.findOne({
@@ -319,14 +337,9 @@ async function removeSubstitute(actor, absenceId) {
       lock: transaction.LOCK.UPDATE,
     });
     if (!absence) throw new ApiError(404, "Absence not found");
-    const cover = await activeSubstitutionFor(absenceId, transaction);
+    const cover = await releaseCover(actor, absence, "substitute removed", transaction);
     if (!cover) throw new ApiError(400, "No substitute assigned.");
-    await cover.destroy({ transaction });
     await absence.update({ status: ABSENCE_STATUS.PENDING }, { transaction });
-    await auditService.record(actor, `removed substitute from absence #${absence.id}`, {
-      entityType: "substitute_assignment",
-      entityId: cover.id,
-    }, { transaction });
   });
   return getById(absenceId, actor.schoolId);
 }
@@ -339,8 +352,8 @@ async function cancel(actor, absenceId) {
       lock: transaction.LOCK.UPDATE,
     });
     if (!absence) throw new ApiError(404, "Absence not found");
-    const cover = await activeSubstitutionFor(absenceId, transaction);
-    if (cover) await cover.destroy({ transaction });
+    if (absence.status === ABSENCE_STATUS.CANCELLED) throw new ApiError(400, "This absence is already cancelled.");
+    await releaseCover(actor, absence, "absence cancelled", transaction);
     await absence.update({ status: ABSENCE_STATUS.CANCELLED }, { transaction });
     await auditService.record(actor, `cancelled absence #${absence.id}`, { entityType: "teacher_absence", entityId: absence.id }, { transaction });
   });

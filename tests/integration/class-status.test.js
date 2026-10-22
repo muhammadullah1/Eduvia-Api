@@ -74,6 +74,46 @@ describe("class status follows enrolment", () => {
     expect(await statusOf(to)).toBe("Active");
   });
 
+  test("bulk promote (concurrent per-student calls) empties the old class", async () => {
+    const from = await emptyClass();
+    const to = await emptyClass();
+    const kids = await Promise.all([makeStudent(school.id, from.id), makeStudent(school.id, from.id), makeStudent(school.id, from.id)]);
+    await from.update({ status: "Active" });
+    await Promise.all(kids.map((kid) => studentService.promote(actor, kid.id, { classId: to.id, sessionId: session.id, date: "2026-10-05" })));
+    expect(await statusOf(from)).toBe("Inactive");
+    expect(await statusOf(to)).toBe("Active");
+  });
+
+  test("graduating or withdrawing all but one keeps Active; the last one leaving makes it Inactive", async () => {
+    const klass = await emptyClass();
+    const [a, b] = [await makeStudent(school.id, klass.id), await makeStudent(school.id, klass.id)];
+    await klass.update({ status: "Active" });
+    await studentService.changeStatus(actor, a.id, { status: "Graduated", reason: "Done", effectiveOn: "2026-10-03", finalResult: "Pass" });
+    expect(await statusOf(klass)).toBe("Active");
+    await studentService.changeStatus(actor, b.id, { status: "Withdrawn", reason: "Moved", effectiveOn: "2026-10-03" });
+    expect(await statusOf(klass)).toBe("Inactive");
+    // Re-admitting the withdrawn student brings the class back.
+    await studentService.changeStatus(actor, b.id, { status: "Active", reason: "Re-admitted", effectiveOn: "2026-10-10" });
+    expect(await statusOf(klass)).toBe("Active");
+  });
+
+  test("deleting the last student (concurrently with another) leaves the class Inactive", async () => {
+    const klass = await emptyClass();
+    const kids = [await makeStudent(school.id, klass.id), await makeStudent(school.id, klass.id)];
+    await klass.update({ status: "Active" });
+    await Promise.all(kids.map((kid) => studentService.remove(kid.id, school.id)));
+    expect(await statusOf(klass)).toBe("Inactive");
+  });
+
+  test("archived classes are never reactivated by student moves", async () => {
+    const klass = await emptyClass();
+    await klass.update({ status: "Archived" });
+    const { syncClassStatus } = require("../../services/class.service");
+    await makeStudent(school.id, klass.id);
+    await syncClassStatus(klass.id);
+    expect(await statusOf(klass)).toBe("Archived");
+  });
+
   test("enrolling an admitted application activates the class", async () => {
     const klass = await emptyClass();
     const app = await applicationService.createDraft(school.id, { name: "New Kid", fkClassId: klass.id });
