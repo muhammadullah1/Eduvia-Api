@@ -45,6 +45,7 @@ module.exports = {
       q: Joi.string().max(120).allow(""),
       submitted: Joi.string().valid("true", "false"),
       hasInterview: Joi.string().valid("true", "false"),
+      decision: Joi.string().valid("Admit", "Reject", "Waitlist"),
       page: Joi.number().integer().min(1).default(1),
       pageSize: Joi.number().integer().min(1).max(200).default(10),
     }),

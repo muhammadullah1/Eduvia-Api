@@ -12,6 +12,8 @@ module.exports = (sequelize, DataTypes) => {
       fkSessionId: { type: DataTypes.INTEGER, allowNull: false, field: "fk_session_id" },
       promotedOn: { type: DataTypes.DATEONLY, allowNull: false, field: "promoted_on" },
       fkActorUserId: { type: DataTypes.INTEGER, allowNull: true, field: "fk_actor_user_id" },
+      /** Promoted (moved up a class) or Repeated (held back). */
+      outcome: { type: DataTypes.STRING(20), allowNull: false, defaultValue: "Promoted" },
     },
     {
       tableName: "student_promotions",
@@ -27,6 +29,7 @@ module.exports = (sequelize, DataTypes) => {
     StudentPromotion.belongsTo(models.Classes, { foreignKey: "fkFromClassId", as: "fromClass" });
     StudentPromotion.belongsTo(models.Classes, { foreignKey: "fkToClassId", as: "toClass" });
     StudentPromotion.belongsTo(models.AcademicSessions, { foreignKey: "fkSessionId", as: "session" });
+    StudentPromotion.belongsTo(models.Users, { foreignKey: "fkActorUserId", as: "actor" });
   };
 
   return StudentPromotion;

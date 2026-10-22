@@ -10,6 +10,8 @@ const router = express.Router();
 const manage = authorize("students.manage");
 
 router.get("/", authorize("students.read"), c.list);
+router.get("/promotions/history", manage, validate(v.validatePromotionHistory), c.promotionHistory);
+router.post("/promotions/bulk", manage, validate(v.validateBulkPromote), c.bulkPromote);
 router.get("/:id", authorize("students.read"), validate(v.validateId), c.getById);
 router.post("/", manage, validate(v.validateCreate), c.create);
 router.patch("/:id", manage, validate(v.validateId), validate(v.validateUpdate), c.update);
