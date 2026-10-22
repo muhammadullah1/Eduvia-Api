@@ -305,6 +305,66 @@ describe("schema-aligned critical flows", () => {
     ).rejects.toThrow();
   });
 
+  test("absence with cover is saved in one transaction and rolls back when a cover is busy", async () => {
+    const fx = await buildSchool();
+    const preview = await teacherAbsenceService.previewCover(fx.school.id, {
+      teacherId: fx.teacher.id,
+      date: MONDAY,
+      periods: [1],
+    });
+    expect(preview.periods[0].class.id).toBe(fx.klass.id);
+    expect(preview.periods[0].free.map((t) => t.id)).toContain(fx.cover.id);
+    expect(await TeacherAbsences.count({ where: { fkTeacherId: fx.teacher.id } })).toBe(0);
+
+    await TimetableSlots.create({
+      fkSchoolId: fx.school.id,
+      fkClassId: fx.klass.id,
+      fkTeacherId: fx.cover.id,
+      fkSubjectId: fx.subject.id,
+      day: "Monday",
+      periodIndex: 2,
+    });
+    await TimetableSlots.create({
+      fkSchoolId: fx.school.id,
+      fkClassId: fx.klass.id,
+      fkTeacherId: fx.teacher.id,
+      fkSubjectId: fx.subject.id,
+      day: "Monday",
+      periodIndex: 3,
+    });
+    await expect(
+      teacherAbsenceService.markAbsentWithCover(fx.actor, {
+        teacherId: fx.teacher.id,
+        date: MONDAY,
+        periods: [1, 3],
+        assignments: [
+          { periodIndex: 1, substituteTeacherId: fx.cover.id },
+          { periodIndex: 3, substituteTeacherId: fx.teacher.id },
+        ],
+      }),
+    ).rejects.toMatchObject({ statusCode: 400 });
+    expect(await TeacherAbsences.count({ where: { fkTeacherId: fx.teacher.id } })).toBe(0);
+
+    const saved = await teacherAbsenceService.markAbsentWithCover(fx.actor, {
+      teacherId: fx.teacher.id,
+      date: MONDAY,
+      periods: [1, 3],
+      assignments: [{ periodIndex: 1, substituteTeacherId: fx.cover.id }],
+    });
+    expect(saved.assigned).toBe(1);
+    expect(saved.absences.map((row) => [row.periodIndex, row.status])).toEqual([
+      [1, "Covered"],
+      [3, "Pending"],
+    ]);
+
+    const busyPreview = await teacherAbsenceService.previewCover(fx.school.id, {
+      teacherId: fx.teacher.id,
+      date: MONDAY,
+      periods: [2],
+    });
+    expect(busyPreview.periods[0].class).toBeNull();
+  });
+
   test("a daily lesson is stored as submitted and keeps classwork and the chapter link", async () => {
     const fx = await buildSchool();
     const chapter = await PlannedChapters.create({

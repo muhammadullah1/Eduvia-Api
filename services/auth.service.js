@@ -9,6 +9,7 @@ const { generateToken, verifyToken } = require("../utils");
 const { USER_STATUS } = require("../constants");
 const { assertPortalRole, getPortalForRole } = require("../constants/portals");
 const ApiError = require("../utils/ApiError");
+const refreshTokens = require("./refresh_token.service");
 
 function getResetSecret(user) {
   return `${config.get("signInJwtSecret")}_reset_${user.password || "initial"}`;
@@ -62,17 +63,10 @@ async function signIn(email, password, schoolId) {
   delete userJson.archived_at;
   delete userJson.archivedBy;
 
-  const token = generateToken(
-    {
-      id: user.id,
-      schoolId: user.fkSchoolId,
-      role: user.role,
-      email: user.email,
-    },
-    "1d",
-  );
+  const token = refreshTokens.accessTokenFor(user);
+  const { raw: refreshToken } = await refreshTokens.issue(user.id);
 
-  return { user: userJson, token, portal: getPortalForRole(user.role) };
+  return { user: userJson, token, refreshToken, portal: getPortalForRole(user.role) };
 }
 
 

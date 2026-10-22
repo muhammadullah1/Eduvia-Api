@@ -157,18 +157,10 @@ module.exports = {
       next(err);
     }
   },
-  presignDocument: async (req, res, next) => {
+  documentUrl: async (req, res, next) => {
     try {
-      const data = await applicationService.presignDocumentUpload(
-        req.params.id,
-        req.user.schoolId,
-        req.body,
-      );
-      res.status(200).json({
-        success: true,
-        message: "Upload URL created",
-        data,
-      });
+      const data = await applicationService.documentDownloadUrl(req.user, req.params.id, req.params.documentId);
+      res.status(200).json({ success: true, message: "Document link", data });
     } catch (err) {
       next(err);
     }

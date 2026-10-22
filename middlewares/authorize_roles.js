@@ -16,7 +16,7 @@ function authorizeRoles(allowedRoles = []) {
       if (!valid) {
         throw new ApiError(
           401,
-          expired ? "Ooops Token expired" : "Invalid token",
+          expired ? "Your session has expired. Please sign in again." : "Invalid token",
         );
       }
 

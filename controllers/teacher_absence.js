@@ -6,6 +6,13 @@ const { handle } = require("../utils/handler");
 module.exports = {
   list: handle("Teacher absences", (req) => teacherAbsenceService.list(req.user.schoolId, req.query, req.user)),
   markAbsent: handle("Absence recorded", (req) => teacherAbsenceService.markAbsent(req.user, req.body), 201),
+  previewCover: handle("Cover options", (req) =>
+    teacherAbsenceService.previewCover(req.user.schoolId, {
+      ...req.query,
+      periods: req.query.periods.split(",").map(Number),
+    }),
+  ),
+  markAbsentWithCover: handle("Absence and cover saved", (req) => teacherAbsenceService.markAbsentWithCover(req.user, req.body), 201),
   availableSubstitutes: handle("Available substitutes", (req) =>
     teacherAbsenceService.availableSubstitutes(req.user.schoolId, req.params.id),
   ),

@@ -9,7 +9,10 @@ const v = require("../validations/auth");
 const router = express.Router();
 
 router.post("/login", validate(v.validateLogin), c.signIn);
+router.post("/refresh", c.refresh);
+router.post("/logout", c.logout);
 router.post("/change-password", authorize("account.self"), validate(v.validateChangePassword), c.updatePassword);
+router.post("/get-presigned-url", authorize("account.self"), validate(v.validatePresignedUrl), c.getPresignedUrl);
 router.post("/forgot-password", validate(v.validateForgotPassword), c.forgotPassword);
 router.get("/verify-token", validate(v.validateVerifyToken), c.verifyResetToken);
 router.post("/reset-password", validate(v.validateResetPassword), c.resetPassword);

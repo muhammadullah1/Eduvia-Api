@@ -31,6 +31,32 @@ async function assertNoActiveDuplicate(schoolId, sessionId, grade, section, excl
   }
 }
 
+/** Students who still belong to a class (not withdrawn, struck off or graduated). */
+const ENROLLED = { status: { [Op.notIn]: ["Withdrawn", "StruckOff", "Graduated"] } };
+
+function enrolledCount(classId, transaction) {
+  return Students.count({ where: { fkClassId: classId, ...ENROLLED }, transaction });
+}
+
+/**
+ * Class status is derived: Active while it has enrolled students, Inactive
+ * when it has none. Archived (deleted) classes are left alone. Call this
+ * inside the transaction that moved students in or out.
+ */
+async function syncClassStatus(classIds, transaction) {
+  const ids = [...new Set([].concat(classIds).filter(Boolean).map(Number))];
+  for (const id of ids) {
+    const row = await Classes.findByPk(id, { transaction });
+    if (!row || row.status === "Archived") continue;
+    const next = (await enrolledCount(id, transaction)) > 0 ? "Active" : "Inactive";
+    if (row.status !== next) await row.update({ status: next }, { transaction });
+  }
+}
+
+function plural(count, word) {
+  return `${count} ${word}${count === 1 ? "" : "s"}`;
+}
+
 async function attachStats(rows) {
   if (!rows.length) return rows;
   const ids = rows.map((row) => row.id);
@@ -43,7 +69,7 @@ async function attachStats(rows) {
     ],
     where: {
       fkClassId: { [Op.in]: ids },
-      status: { [Op.notIn]: ["Withdrawn", "StruckOff"] },
+      ...ENROLLED,
     },
     group: ["fkClassId"],
     raw: true,
@@ -118,7 +144,8 @@ async function create(schoolId, data) {
       `A class named "${grade}" is already in the archive for this session. Restore it from Settings → Archives instead of creating a new one.`,
     );
   }
-  return Classes.create({ ...data, fkSchoolId: schoolId, status: "Active" });
+  // A new class has no students yet, so it starts Inactive.
+  return Classes.create({ ...data, fkSchoolId: schoolId, status: "Inactive" });
 }
 
 async function update(id, schoolId, data) {
@@ -131,12 +158,22 @@ async function update(id, schoolId, data) {
     await assertNoActiveDuplicate(schoolId, sessionId, grade, section, id);
   }
 
-  await row.update(data);
+  // Status follows enrolment (syncClassStatus); it is never set by hand.
+  const changes = { ...data };
+  delete changes.status;
+  await row.update(changes);
   return row;
 }
 
 async function remove(id, schoolId) {
   const row = await getById(id, schoolId);
+  const count = await enrolledCount(row.id);
+  if (count > 0) {
+    throw new ApiError(
+      409,
+      `${row.label} has ${plural(count, "enrolled student")}. Move or withdraw them before deleting the class.`,
+    );
+  }
   await row.update({ status: "Archived" });
   await row.destroy();
   return true;
@@ -160,7 +197,7 @@ async function restore(id, schoolId) {
   );
 
   await row.restore();
-  await row.update({ status: "Active" });
+  await row.update({ status: (await enrolledCount(row.id)) > 0 ? "Active" : "Inactive" });
   return row;
 }
 
@@ -171,4 +208,6 @@ module.exports = {
   update,
   remove,
   restore,
+  syncClassStatus,
+  enrolledCount,
 };

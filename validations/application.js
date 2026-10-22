@@ -1,6 +1,7 @@
 "use strict";
 
 const Joi = require("joi");
+const { interviewDateRange } = require("../utils/dates");
 const { isValidPhonePk } = require("../utils/pakistan");
 
 const phoneSchema = Joi.string().custom((value, helpers) => {
@@ -15,24 +16,27 @@ const docSchema = Joi.object({
   id: Joi.alternatives().try(Joi.number().integer(), Joi.string()),
   label: Joi.string().required(),
   status: Joi.string().valid("Pending", "Uploaded", "Verified", "Rejected"),
+  // A legacy URL/placeholder, or an R2 object key (checked against the application in the service).
   fileUrl: Joi.string()
-    .pattern(/^(https?:\/\/|pending:\/\/)/)
+    .max(500)
+    .pattern(/^(https?:\/\/|pending:\/\/|admissions\/\d+\/documents\/[\w.-]+$)/)
     .allow("", null),
 });
 
-const interviewDateSchema = Joi.date().iso().allow(null).custom((value, helpers) => {
-  if (!value) return value;
-  const d = new Date(value);
-  const iso = d.toISOString().slice(0, 10);
-  const min = new Date().toISOString().slice(0, 10);
-  const maxDate = new Date();
-  maxDate.setMonth(maxDate.getMonth() + 18);
-  const max = maxDate.toISOString().slice(0, 10);
-  if (iso < min || iso > max) {
-    return helpers.message(`Interview date must be between ${min} and ${max}`);
-  }
-  return value;
-});
+// Kept as a `YYYY-MM-DD` string: Joi.date() would turn it into a Date whose
+// String() form ("Thu Nov 05 …") breaks the range check in the service.
+const interviewDateSchema = Joi.string()
+  .pattern(/^\d{4}-\d{2}-\d{2}$/)
+  .allow(null, "")
+  .custom((value, helpers) => {
+    if (!value) return value;
+    const { min, max } = interviewDateRange();
+    if (value < min || value > max) {
+      return helpers.message(`Interview date must be between ${min} and ${max}`);
+    }
+    return value;
+  })
+  .messages({ "string.pattern.base": "Interview date must be a date (YYYY-MM-DD)" });
 
 module.exports = {
   validateList: {
@@ -140,20 +144,6 @@ module.exports = {
     params: Joi.object({
       id: Joi.number().integer().required(),
       documentId: Joi.number().integer().required(),
-    }),
-  },
-  validatePresignDocument: {
-    body: Joi.object({
-      documentId: Joi.number().integer().required(),
-      contentType: Joi.string()
-        .valid(
-          "application/pdf",
-          "image/jpeg",
-          "image/png",
-          "image/webp",
-        )
-        .required(),
-      fileName: Joi.string().max(200).required(),
     }),
   },
 };
