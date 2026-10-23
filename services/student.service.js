@@ -6,6 +6,7 @@ const { STUDENT_STATUS } = require("../constants");
 const ApiError = require("../utils/ApiError");
 const auditService = require("./audit.service");
 const { syncClassStatus } = require("./class.service");
+const lifecycle = require("./lifecycle.service");
 
 /**
  * `scope` narrows rows for restricted roles: parents get their linked
@@ -92,72 +93,39 @@ async function update(id, schoolId, data) {
   return getById(id, schoolId);
 }
 
-async function outstandingOf(studentId, transaction) {
-  const months = await StudentFeeMonths.findAll({ where: { fkStudentId: studentId }, transaction });
-  return months.reduce((sum, month) => sum + Math.max(0, Number(month.getDataValue("netAmount")) - Number(month.getDataValue("paidAmount"))), 0);
-}
-
-async function changeStatus(actor, id, { status, reason, effectiveOn, finalResult, academicStatus }) {
-  if (!Object.values(STUDENT_STATUS).includes(status)) throw new ApiError(400, "Invalid student status");
-  if (!String(reason || "").trim()) throw new ApiError(400, "A reason is required");
-  if (!effectiveOn) throw new ApiError(400, "A date is required");
-  if (status === STUDENT_STATUS.GRADUATED && !String(finalResult || "").trim()) {
-    throw new ApiError(400, "Graduation requires the final result");
-  }
-  if (status === STUDENT_STATUS.STRUCK_OFF && !String(academicStatus || "").trim()) {
-    throw new ApiError(400, "Strike-off requires the academic status");
-  }
-  const student = await Students.findOne({ where: { id, fkSchoolId: actor.schoolId } });
-  if (!student) throw new ApiError(404, "Student not found");
-  if (student.status === status) throw new ApiError(400, "The student already has that status");
-  const previous = student.status;
-  const session = await AcademicSessions.findOne({ where: { fkSchoolId: actor.schoolId, isCurrent: true } });
-  const financial = status === STUDENT_STATUS.STRUCK_OFF
-    ? `Outstanding ${(await outstandingOf(student.id)).toFixed(2)}`
-    : null;
-  await sequelize.transaction(async (transaction) => {
-    await StudentStatusEvents.create({
-      fkSchoolId: actor.schoolId,
-      fkStudentId: student.id,
-      fromStatus: previous,
-      toStatus: status,
-      reason: String(reason).trim(),
-      effectiveOn,
-      fkActorUserId: actor.id,
-      fkClassId: student.fkClassId,
-      fkSessionId: session ? session.id : null,
-      finalResult: finalResult || null,
-      academicStatus: academicStatus || null,
-      financialStatus: financial,
-    }, { transaction });
-    await student.update({ status }, { transaction });
-    await syncClassStatus(student.fkClassId, transaction);
-    await auditService.record(actor, `changed student #${student.id} status from ${previous} to ${status}`, {
-      entityType: "student",
-      entityId: student.id,
-      metadata: { from: previous, to: status, reason, effectiveOn, finalResult, academicStatus, financial },
-    }, { transaction });
-  });
+/** Status changes live in lifecycle.service (transition map, SRS fields, audit). */
+async function changeStatus(actor, id, input) {
+  await lifecycle.changeStatus(actor, id, input);
   return getById(id, actor.schoolId);
 }
 
+/**
+ * Promote one student (SRS 4.3.3: previous class, new class, session, date,
+ * permanent history). Only Active students move (D5: not Inactive); the
+ * target class must be in the chosen session and have a free seat.
+ */
 async function promote(actor, id, { classId, sessionId, date }) {
   if (!date) throw new ApiError(400, "A promotion date is required");
-  const student = await Students.findOne({ where: { id, fkSchoolId: actor.schoolId } });
-  if (!student) throw new ApiError(404, "Student not found");
-  const session = sessionId
-    ? await AcademicSessions.findOne({ where: { id: sessionId, fkSchoolId: actor.schoolId } })
-    : await AcademicSessions.findOne({ where: { fkSchoolId: actor.schoolId, isCurrent: true } });
-  if (!session) throw new ApiError(404, "Session not found");
-  const nextClass = await Classes.findOne({ where: { id: classId, fkSchoolId: actor.schoolId, fkSessionId: session.id } });
-  if (!nextClass) throw new ApiError(404, "Class not found in that session");
-  if (nextClass.id === student.fkClassId) throw new ApiError(400, "Choose a different class");
-  if (nextClass.capacity != null) {
-    const seated = await Students.count({ where: { fkClassId: nextClass.id, status: STUDENT_STATUS.ACTIVE } });
-    if (seated >= Number(nextClass.capacity)) throw new ApiError(409, "Class is at capacity");
-  }
-  const previousClassId = student.fkClassId;
   await sequelize.transaction(async (transaction) => {
+    const student = await Students.findOne({ where: { id, fkSchoolId: actor.schoolId }, transaction, lock: transaction.LOCK.UPDATE });
+    if (!student) throw new ApiError(404, "Student not found");
+    if (student.status !== STUDENT_STATUS.ACTIVE) {
+      throw new ApiError(409, `Only Active students can be promoted (this student is ${student.status === "StruckOff" ? "Struck off" : student.status})`);
+    }
+    lifecycle.assertEffectiveDate(student, date);
+    const session = sessionId
+      ? await AcademicSessions.findOne({ where: { id: sessionId, fkSchoolId: actor.schoolId }, transaction })
+      : await AcademicSessions.findOne({ where: { fkSchoolId: actor.schoolId, isCurrent: true }, transaction });
+    if (!session) throw new ApiError(404, "Session not found");
+    const nextClass = await Classes.findOne({
+      where: { id: classId, fkSchoolId: actor.schoolId, fkSessionId: session.id },
+      transaction,
+      lock: transaction.LOCK.NO_KEY_UPDATE,
+    });
+    if (!nextClass) throw new ApiError(404, "Class not found in that session");
+    if (nextClass.id === student.fkClassId) throw new ApiError(400, "Choose a different class");
+    await lifecycle.assertSeats(nextClass, 1, transaction);
+    const previousClassId = student.fkClassId;
     await StudentPromotions.create({
       fkSchoolId: actor.schoolId,
       fkStudentId: student.id,
@@ -166,6 +134,7 @@ async function promote(actor, id, { classId, sessionId, date }) {
       fkSessionId: session.id,
       promotedOn: date,
       fkActorUserId: actor.id,
+      outcome: "Promoted",
     }, { transaction });
     await student.update({ fkClassId: nextClass.id }, { transaction });
     await syncClassStatus([previousClassId, nextClass.id], transaction);
@@ -178,10 +147,19 @@ async function promote(actor, id, { classId, sessionId, date }) {
   return getById(id, actor.schoolId);
 }
 
+/** Lifecycle history is permanent: only a Pending student with no history can be removed. */
 async function remove(id, schoolId) {
-  const row = await Students.findOne({ where: { id, fkSchoolId: schoolId } });
-  if (!row) throw new ApiError(404, "Student not found");
   await sequelize.transaction(async (transaction) => {
+    const row = await Students.findOne({ where: { id, fkSchoolId: schoolId }, transaction, lock: transaction.LOCK.UPDATE });
+    if (!row) throw new ApiError(404, "Student not found");
+    const [events, promotions, months] = await Promise.all([
+      StudentStatusEvents.count({ where: { fkStudentId: row.id }, transaction }),
+      StudentPromotions.count({ where: { fkStudentId: row.id }, transaction }),
+      StudentFeeMonths.count({ where: { fkStudentId: row.id }, transaction }),
+    ]);
+    if (row.status !== STUDENT_STATUS.PENDING || events || promotions || months) {
+      throw new ApiError(409, "This student has lifecycle or fee history and cannot be deleted. Change their status instead.");
+    }
     await row.destroy({ transaction });
     await syncClassStatus(row.fkClassId, transaction);
   });

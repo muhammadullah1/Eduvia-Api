@@ -89,3 +89,13 @@ The live portal hydrates from the API when a token exists, and otherwise keeps t
 | Hide accountant totals only in React | Omit aggregates in the API payload |
 | Filter parent results only in the screen | Apply the fee gate in `parentResults` |
 | Treat `src/portal/*` as the product | Follow `src/features/*` and `src/data/types.ts` |
+
+## Student lifecycle (EDUVIA-14)
+
+- Statuses are `Pending`, `Active`, `Inactive`, `StruckOff`, `Graduated` and `Withdrawn`. `Withdrawn` only applies to `Pending` (never enrolled). A student who leaves after enrollment is `StruckOff`, with a reason category.
+- Every change goes through `POST /students/:id/status` or `POST /students/:id/promote`, and is written to `student_status_events` (migration 055). Rows are append-only, enforced in `lifecycle.service`. Never update or delete them.
+- Effective dates may be in the past, never in the future, and never before admission. Reactivation does not backfill missed fee months.
+- A student graduates only from the final grade unless `graduationOverride` is set. The override is audited and needs a reason.
+- Readmission is allowed from `StruckOff`, `Graduated` or `Withdrawn`. It needs a class and session and checks class capacity. `Inactive` students cannot be promoted.
+- `/admin/lifecycle` has a Change status tab and a History tab. History is filtered and paginated on the server. CSV export walks every page on the client.
+- Result visibility now lives at `/admin/exams/result-visibility`, behind `results.override`, and `/admin/results-gate` redirects there. An override always needs a reason of at least 3 characters. Visibility state is still read from the client store.

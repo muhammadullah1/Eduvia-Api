@@ -17,6 +17,12 @@ module.exports = (sequelize, DataTypes) => {
       finalResult: { type: DataTypes.STRING(255), allowNull: true, field: "final_result" },
       academicStatus: { type: DataTypes.STRING(255), allowNull: true, field: "academic_status" },
       financialStatus: { type: DataTypes.STRING(255), allowNull: true, field: "financial_status" },
+      eventType: { type: DataTypes.STRING(20), allowNull: false, field: "event_type" },
+      reasonCategory: { type: DataTypes.STRING(40), allowNull: true, field: "reason_category" },
+      fkToClassId: { type: DataTypes.INTEGER, allowNull: true, field: "fk_to_class_id" },
+      outstandingAmount: { type: DataTypes.DECIMAL(12, 2), allowNull: true, field: "outstanding_amount" },
+      transferToSchool: { type: DataTypes.STRING(255), allowNull: true, field: "transfer_to_school" },
+      graduationOverride: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false, field: "graduation_override" },
     },
     {
       tableName: "student_status_events",
@@ -29,6 +35,10 @@ module.exports = (sequelize, DataTypes) => {
 
   StudentStatusEvent.associate = (models) => {
     StudentStatusEvent.belongsTo(models.Students, { foreignKey: "fkStudentId", as: "student" });
+    StudentStatusEvent.belongsTo(models.Classes, { foreignKey: "fkClassId", as: "class" });
+    StudentStatusEvent.belongsTo(models.Classes, { foreignKey: "fkToClassId", as: "toClass" });
+    StudentStatusEvent.belongsTo(models.AcademicSessions, { foreignKey: "fkSessionId", as: "session" });
+    StudentStatusEvent.belongsTo(models.Users, { foreignKey: "fkActorUserId", as: "actor" });
   };
 
   return StudentStatusEvent;

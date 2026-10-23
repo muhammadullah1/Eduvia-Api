@@ -526,14 +526,14 @@ async function grantOverride(actor, examId, { studentId, reason }) {
   if (!exam) throw new ApiError(404, "Exam not found");
   const student = await Students.findOne({ where: { id: studentId, fkClassId: exam.fkClassId, fkSchoolId: actor.schoolId } });
   if (!student) throw new ApiError(404, "Student is not in this exam's class");
-  const { requireOverrideReason } = await settingsService.get(actor.schoolId, SETTING_KEYS.RESULT_VISIBILITY);
-  if (requireOverrideReason && !String(reason || "").trim()) throw new ApiError(400, "A reason is required for an override.");
+  // D9: a reason is always required (SRS addendum §8 leaves it to the school; the school requires it).
+  if (String(reason || "").trim().length < 3) throw new ApiError(400, "A reason is required for an override.");
   if (await activeOverride(exam.id, student.id)) throw new ApiError(409, "An override is already active for this student.");
   const override = await ResultVisibilityOverrides.create({
     fkSchoolId: actor.schoolId,
     fkExamId: exam.id,
     fkStudentId: student.id,
-    reason: String(reason || "").trim() || "—",
+    reason: String(reason).trim(),
     fkGrantedByUserId: actor.id,
     grantedAt: new Date(),
   });

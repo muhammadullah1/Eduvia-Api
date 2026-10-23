@@ -24,11 +24,11 @@ describe("class status follows enrolment", () => {
     return klass;
   };
 
-  test("create and delete a student", async () => {
+  test("create and delete a (pending) student", async () => {
     const klass = await emptyClass();
     const student = await studentService.create(school.id, {
       fkClassId: klass.id, admissionNo: `C${Date.now()}`.slice(0, 20), firstName: "A", lastName: "B",
-      gender: "Male", dateOfBirth: "2018-01-01", admissionDate: "2026-04-01", status: "Active",
+      gender: "Male", dateOfBirth: "2018-01-01", admissionDate: "2026-04-01", status: "Pending",
     });
     expect(await statusOf(klass)).toBe("Active");
     await studentService.remove(student.id, school.id);
@@ -45,22 +45,28 @@ describe("class status follows enrolment", () => {
     expect(await statusOf(to)).toBe("Active");
   });
 
-  test("withdraw, graduate and strike-off leave; re-activating comes back", async () => {
+  test("strike-off and graduation leave; readmission comes back", async () => {
     const klass = await emptyClass();
     const student = await makeStudent(school.id, klass.id);
     await klass.update({ status: "Active" });
-    await studentService.changeStatus(actor, student.id, { status: "Withdrawn", reason: "Moved", effectiveOn: "2026-10-01" });
+    await studentService.changeStatus(actor, student.id, {
+      status: "StruckOff", reason: "Moved", reasonCategory: "Withdrawn by parent", academicStatus: "Passed Grade", effectiveOn: "2026-10-01",
+    });
     expect(await statusOf(klass)).toBe("Inactive");
-    await studentService.changeStatus(actor, student.id, { status: "Active", reason: "Back", effectiveOn: "2026-10-02" });
+    await studentService.changeStatus(actor, student.id, {
+      status: "Active", reason: "Back", effectiveOn: "2026-10-02", classId: klass.id, sessionId: session.id,
+    });
     expect(await statusOf(klass)).toBe("Active");
-    await studentService.changeStatus(actor, student.id, { status: "Graduated", reason: "Done", effectiveOn: "2026-10-03", finalResult: "Pass" });
+    await studentService.changeStatus(actor, student.id, {
+      status: "Graduated", reason: "Done", effectiveOn: "2026-10-03", finalResult: "Pass", graduationOverride: true,
+    });
     expect(await statusOf(klass)).toBe("Inactive");
   });
 
   test("temporarily Inactive students still keep the class Active", async () => {
     const klass = await emptyClass();
     const student = await makeStudent(school.id, klass.id);
-    await studentService.changeStatus(actor, student.id, { status: "Inactive", reason: "Travel", effectiveOn: "2026-10-01" });
+    await studentService.changeStatus(actor, student.id, { status: "Inactive", reason: "Travel", reasonCategory: "Leave", effectiveOn: "2026-10-01" });
     expect(await statusOf(klass)).toBe("Active");
   });
 
@@ -84,22 +90,28 @@ describe("class status follows enrolment", () => {
     expect(await statusOf(to)).toBe("Active");
   });
 
-  test("graduating or withdrawing all but one keeps Active; the last one leaving makes it Inactive", async () => {
+  test("graduating or striking off all but one keeps Active; the last one leaving makes it Inactive", async () => {
     const klass = await emptyClass();
     const [a, b] = [await makeStudent(school.id, klass.id), await makeStudent(school.id, klass.id)];
     await klass.update({ status: "Active" });
-    await studentService.changeStatus(actor, a.id, { status: "Graduated", reason: "Done", effectiveOn: "2026-10-03", finalResult: "Pass" });
+    await studentService.changeStatus(actor, a.id, {
+      status: "Graduated", reason: "Done", effectiveOn: "2026-10-03", finalResult: "Pass", graduationOverride: true,
+    });
     expect(await statusOf(klass)).toBe("Active");
-    await studentService.changeStatus(actor, b.id, { status: "Withdrawn", reason: "Moved", effectiveOn: "2026-10-03" });
+    await studentService.changeStatus(actor, b.id, {
+      status: "StruckOff", reason: "Moved", reasonCategory: "Transfer out", academicStatus: "Mid-year", effectiveOn: "2026-10-03",
+    });
     expect(await statusOf(klass)).toBe("Inactive");
-    // Re-admitting the withdrawn student brings the class back.
-    await studentService.changeStatus(actor, b.id, { status: "Active", reason: "Re-admitted", effectiveOn: "2026-10-10" });
+    // Readmitting the struck-off student brings the class back.
+    await studentService.changeStatus(actor, b.id, {
+      status: "Active", reason: "Re-admitted", effectiveOn: "2026-10-10", classId: klass.id, sessionId: session.id,
+    });
     expect(await statusOf(klass)).toBe("Active");
   });
 
   test("deleting the last student (concurrently with another) leaves the class Inactive", async () => {
     const klass = await emptyClass();
-    const kids = [await makeStudent(school.id, klass.id), await makeStudent(school.id, klass.id)];
+    const kids = [await makeStudent(school.id, klass.id, { status: "Pending" }), await makeStudent(school.id, klass.id, { status: "Pending" })];
     await klass.update({ status: "Active" });
     await Promise.all(kids.map((kid) => studentService.remove(kid.id, school.id)));
     expect(await statusOf(klass)).toBe("Inactive");

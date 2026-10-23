@@ -1,7 +1,7 @@
 "use strict";
 
 const Joi = require("joi");
-const { STUDENT_STATUS, GENDER } = require("../constants");
+const { STUDENT_STATUS, GENDER, LIFECYCLE_REASONS, LIFECYCLE_HISTORY_TYPES: HISTORY_TYPES } = require("../constants");
 const { id, isoDay } = require("./common");
 
 module.exports = {
@@ -13,7 +13,8 @@ module.exports = {
       lastName: Joi.string().required(),
       gender: Joi.string().valid(...Object.values(GENDER)).allow(null),
       dob: Joi.date().iso().allow(null),
-      status: Joi.string().valid("Active", "Pending", "Withdrawn"),
+      // New records start Pending or Active; later statuses come from the lifecycle (POST /:id/status).
+      status: Joi.string().valid(STUDENT_STATUS.ACTIVE, STUDENT_STATUS.PENDING),
       admittedOn: Joi.date().iso().allow(null),
     }),
   },
@@ -32,10 +33,15 @@ module.exports = {
     params: Joi.object({ id: id.required() }),
     body: Joi.object({
       status: Joi.string().valid(...Object.values(STUDENT_STATUS)).required(),
-      reason: Joi.string().max(1000).required(),
+      reason: Joi.string().trim().max(1000).required(),
       effectiveOn: isoDay.required(),
-      finalResult: Joi.string().max(255).allow("", null),
-      academicStatus: Joi.string().max(255).allow("", null),
+      reasonCategory: Joi.string().valid(...new Set(Object.values(LIFECYCLE_REASONS).flat())).allow(null),
+      finalResult: Joi.string().trim().max(255).allow("", null),
+      graduationOverride: Joi.boolean().default(false),
+      academicStatus: Joi.string().trim().max(255).allow("", null),
+      transferToSchool: Joi.string().trim().max(255).allow("", null),
+      classId: id.allow(null),
+      sessionId: id.allow(null),
     }),
   },
   validatePromote: {
@@ -54,6 +60,7 @@ module.exports = {
       sessionId: id.required(),
       date: isoDay.required(),
       graduationResult: Joi.string().trim().max(255).allow("", null),
+      graduationOverride: Joi.boolean().default(false),
       students: Joi.array()
         .items(Joi.object({ studentId: id.required(), action: Joi.string().valid("promote", "hold", "graduate").required() }))
         .min(1)
@@ -66,6 +73,23 @@ module.exports = {
       page: Joi.number().integer().min(1).default(1),
       pageSize: Joi.number().integer().min(1).max(200).default(20),
       type: Joi.string().valid("Promotion", "Repeat", "Graduation", "New Admission"),
+    }),
+  },
+  validateLifecycleHistory: {
+    query: Joi.object({
+      page: Joi.number().integer().min(1).default(1),
+      pageSize: Joi.number().integer().min(1).max(200).default(20),
+      type: Joi.alternatives(
+        Joi.string().valid(...HISTORY_TYPES),
+        Joi.array().items(Joi.string().valid(...HISTORY_TYPES)).max(HISTORY_TYPES.length),
+      ),
+      from: isoDay,
+      to: isoDay,
+      classId: id,
+      sessionId: id,
+      studentId: id,
+      reasonCategory: Joi.string().max(40),
+      q: Joi.string().trim().max(100).allow(""),
     }),
   },
   validateId: {

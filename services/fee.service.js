@@ -6,6 +6,7 @@ const {
   FeePayments,
   FeeAllocations,
   StudentFeeMonths,
+  StudentStatusEvents,
   Students,
   Classes,
   Users,
@@ -120,13 +121,34 @@ async function createMonth(schoolId, student, month, amountDue, dueDay, transact
   });
 }
 
-/** Extend a student's ledger forward (no gaps) so it includes month `to`. */
+/** Statuses that accrue new fee months (SRS p15: Active is in fee generation). */
+const BILLABLE = [STUDENT_STATUS.ACTIVE, STUDENT_STATUS.PENDING];
+
+/**
+ * Month a returning student starts paying again: the latest reactivation or
+ * readmission. Months while Inactive / struck off are never back-filled (D2).
+ */
+async function resumeMonth(studentId, transaction) {
+  const latest = await StudentStatusEvents.max("effectiveOn", {
+    where: { fkStudentId: studentId, eventType: ["Reactivated", "Readmitted"] },
+    transaction,
+  });
+  return latest ? monthStamp(isoDay(latest)) : null;
+}
+
+/**
+ * Extend a billable student's ledger forward so it includes month `to`.
+ * Gaps are only left for time spent Inactive or off roll.
+ */
 async function ensureMonthsThrough(schoolId, student, to, transaction) {
+  if (!BILLABLE.includes(student.status)) return;
   const { dueDay } = await settingsService.get(schoolId, SETTING_KEYS.FEES, { transaction });
   const amountDue = await monthlyFeeFor(schoolId, student, transaction);
   const target = monthStamp(to);
   const last = await StudentFeeMonths.max("month", { where: { fkStudentId: student.id }, transaction });
   let month = last ? stepMonth(last, 1) : await ledgerStart(schoolId, student, target, transaction);
+  const resume = await resumeMonth(student.id, transaction);
+  if (resume && resume > month) month = resume;
   for (; month <= target; month = stepMonth(month, 1)) {
     await createMonth(schoolId, student, month, amountDue, dueDay, transaction);
   }

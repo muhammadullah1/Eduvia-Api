@@ -133,7 +133,7 @@ describe("lifecycle, leave, reports, and documents", () => {
     await expect(studentService.update(fx.student.id, fx.school.id, { status: "Withdrawn" })).rejects.toMatchObject({ statusCode: 400 });
     await expect(studentService.changeStatus(fx.actor, fx.student.id, { status: "Graduated", reason: "Completed", effectiveOn: "2027-03-31" })).rejects.toMatchObject({ statusCode: 400 });
     const struck = await studentService.changeStatus(fx.actor, fx.student.id, {
-      status: "StruckOff", reason: "Left without notice", effectiveOn: "2026-10-01", academicStatus: "Incomplete",
+      status: "StruckOff", reason: "Left without notice", reasonCategory: "Long absence", effectiveOn: "2026-10-01", academicStatus: "Incomplete",
     });
     expect(struck.status).toBe("StruckOff");
     expect(struck.statusEvents[0].financialStatus).toMatch(/Outstanding/);

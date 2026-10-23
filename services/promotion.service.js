@@ -9,6 +9,7 @@ const { STUDENT_STATUS, APPLICATION_STATUS } = require("../constants");
 const ApiError = require("../utils/ApiError");
 const auditService = require("./audit.service");
 const { syncClassStatus } = require("./class.service");
+const lifecycle = require("./lifecycle.service");
 
 const ACTIONS = { PROMOTE: "promote", HOLD: "hold", GRADUATE: "graduate" };
 const OUTCOME = { PROMOTED: "Promoted", REPEATED: "Repeated" };
@@ -39,7 +40,7 @@ async function holdBackClass(fromClass, session, holdClassId, transaction) {
  * graduates leave with status Graduated. Either everyone is processed or nobody.
  */
 async function bulkPromote(actor, input) {
-  const { fromClassId, toClassId, sessionId, date, students, graduationResult } = input;
+  const { fromClassId, toClassId, sessionId, date, students, graduationResult, graduationOverride = false } = input;
   const ids = students.map((row) => Number(row.studentId));
   if (new Set(ids).size !== ids.length) throw new ApiError(400, "A student is listed more than once");
   const promoting = students.filter((row) => row.action === ACTIONS.PROMOTE);
@@ -82,7 +83,10 @@ async function bulkPromote(actor, input) {
       throw new ApiError(409, `Some students are no longer active in ${fromClass.label}. Reload and try again.`, { studentIds: invalid });
     }
 
-    // Capacity: everyone arriving must fit alongside the students already seated.
+    // D1: no future dates and nothing before a student's admission.
+    for (const row of rows) lifecycle.assertEffectiveDate(row, date);
+
+    // Capacity: everyone arriving must fit alongside the students already enrolled there.
     const arrivals = new Map();
     if (toClass) arrivals.set(toClass.id, { klass: toClass, count: promoting.length });
     if (repeatClass && repeatClass.id !== fromClass.id) {
@@ -90,31 +94,17 @@ async function bulkPromote(actor, input) {
       entry.count += holds.length;
       arrivals.set(repeatClass.id, entry);
     }
-    for (const { klass, count } of arrivals.values()) {
-      if (klass.capacity == null) continue;
-      const seated = await Students.count({ where: { fkClassId: klass.id, status: STUDENT_STATUS.ACTIVE }, transaction });
-      if (seated + count > Number(klass.capacity)) {
-        throw new ApiError(409, `${klass.label} has room for ${Math.max(0, Number(klass.capacity) - seated)} more students`);
-      }
-    }
+    for (const { klass, count } of arrivals.values()) await lifecycle.assertSeats(klass, count, transaction);
 
     const summary = { promoted: 0, repeated: 0, graduated: 0 };
     for (const entry of students) {
       const student = byId.get(Number(entry.studentId));
       if (entry.action === ACTIONS.GRADUATE) {
-        await StudentStatusEvents.create({
-          fkSchoolId: actor.schoolId,
-          fkStudentId: student.id,
-          fromStatus: student.status,
-          toStatus: STUDENT_STATUS.GRADUATED,
-          reason: `Graduated from ${fromClass.label}`,
-          effectiveOn: date,
-          fkActorUserId: actor.id,
-          fkClassId: fromClass.id,
-          fkSessionId: session.id,
-          finalResult: String(graduationResult).trim(),
-        }, { transaction });
-        await student.update({ status: STUDENT_STATUS.GRADUATED }, { transaction });
+        // Same rules as a single graduation (final grade unless overridden).
+        const { override } = await lifecycle.graduate(actor, student, {
+          date, finalResult: graduationResult, override: graduationOverride, reason: `Graduated from ${fromClass.label}`,
+        }, transaction);
+        if (override) summary.graduationOverride = true;
         summary.graduated += 1;
         continue;
       }

@@ -31,6 +31,26 @@ exports.STUDENT_STATUS = {
   WITHDRAWN: "Withdrawn",
 };
 
+/** What a student_status_events row records (SRS 4.3.3). */
+exports.LIFECYCLE_EVENT = {
+  ENROLLED: "Enrolled",
+  DEACTIVATED: "Deactivated",
+  REACTIVATED: "Reactivated",
+  GRADUATED: "Graduated",
+  STRUCK_OFF: "StruckOff",
+  WITHDRAWN: "Withdrawn",
+  READMITTED: "Readmitted",
+};
+
+/** Reason groups. Inactive is temporary; strike-off formally ends enrollment. */
+exports.LIFECYCLE_REASONS = {
+  Inactive: ["Leave", "Medical", "Fee hold", "Other"],
+  StruckOff: ["Transfer out", "Withdrawn by parent", "Long absence", "Disciplinary", "Policy", "Other"],
+};
+
+/** Types in the lifecycle history feed: promotion outcomes plus status events. */
+exports.LIFECYCLE_HISTORY_TYPES = ["Promoted", "Repeated", ...Object.values(exports.LIFECYCLE_EVENT)];
+
 exports.APPLICATION_STATUS = {
   NEW: "New",
   REVIEW: "Review",
