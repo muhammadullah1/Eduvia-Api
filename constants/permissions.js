@@ -40,6 +40,7 @@ const PERMISSIONS = {
   "reports.dashboard": [SA, OPS, TCH, PAR],
   "parents.manage": [SA, OPS],
   "admissions.manage": [SA, OPS],
+  "documents.read": [SA, OPS, PAR],
 
   "attendance.read": [SA, OPS, TCH, PAR],
   "attendance.mark": [SA, OPS, TCH],

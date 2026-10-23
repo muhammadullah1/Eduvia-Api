@@ -15,6 +15,8 @@ const {
   PlannedChapters,
   Attendances,
   TeacherAbsences,
+  SubstituteAssignments,
+  AuditLogs,
   DailyLessons,
   MarkSheets,
   StudentFeeMonths,
@@ -303,6 +305,107 @@ describe("schema-aligned critical flows", () => {
         status: "Pending",
       }),
     ).rejects.toThrow();
+  });
+
+  test("cancelling one period's absence releases only its cover, which can be booked again", async () => {
+    const fx = await buildSchool();
+    await TimetableSlots.create({
+      fkSchoolId: fx.school.id, fkClassId: fx.klass.id, fkTeacherId: fx.teacher.id, fkSubjectId: fx.subject.id, day: "Monday", periodIndex: 2,
+    });
+    const [p1, p2] = await teacherAbsenceService.markAbsent(fx.actor, { teacherId: fx.teacher.id, date: MONDAY, periods: [1, 2] });
+    await teacherAbsenceService.assignSubstitute(fx.actor, p1.id, { substituteTeacherId: fx.cover.id });
+    await teacherAbsenceService.assignSubstitute(fx.actor, p2.id, { substituteTeacherId: fx.cover.id });
+
+    const cancelled = await teacherAbsenceService.cancel(fx.actor, p1.id);
+    expect(cancelled.status).toBe("Cancelled");
+    const released = await SubstituteAssignments.findOne({ where: { fkAbsenceId: p1.id }, paranoid: false });
+    expect(released.status).toBe("Cancelled");
+    expect(released.get("archived_at") || released.deletedAt).toBeTruthy();
+    // The other period keeps its cover.
+    const kept = await SubstituteAssignments.findOne({ where: { fkAbsenceId: p2.id } });
+    expect(kept.status).toBe("Assigned");
+    expect((await TeacherAbsences.findByPk(p2.id)).status).toBe("Covered");
+    expect(await AuditLogs.count({ where: { entityType: "substitute_assignment", entityId: released.id } })).toBeGreaterThan(0);
+
+    await expect(teacherAbsenceService.cancel(fx.actor, p1.id)).rejects.toMatchObject({ statusCode: 400 });
+    // Re-marking the period and booking the same substitute works again.
+    const [again] = await teacherAbsenceService.markAbsent(fx.actor, { teacherId: fx.teacher.id, date: MONDAY, periods: [1] });
+    await expect(
+      teacherAbsenceService.assignSubstitute(fx.actor, again.id, { substituteTeacherId: fx.cover.id }),
+    ).resolves.toMatchObject({ status: "Covered" });
+  });
+
+  test("removing a substitute releases it with status Cancelled and reopens the absence", async () => {
+    const fx = await buildSchool();
+    const [row] = await teacherAbsenceService.markAbsent(fx.actor, { teacherId: fx.teacher.id, date: MONDAY, periods: [1] });
+    await teacherAbsenceService.assignSubstitute(fx.actor, row.id, { substituteTeacherId: fx.cover.id });
+    const reopened = await teacherAbsenceService.removeSubstitute(fx.actor, row.id);
+    expect(reopened.status).toBe("Pending");
+    const released = await SubstituteAssignments.findOne({ where: { fkAbsenceId: row.id }, paranoid: false });
+    expect(released.status).toBe("Cancelled");
+    await expect(
+      teacherAbsenceService.assignSubstitute(fx.actor, row.id, { substituteTeacherId: fx.cover.id }),
+    ).resolves.toMatchObject({ status: "Covered" });
+  });
+
+  test("absence with cover is saved in one transaction and rolls back when a cover is busy", async () => {
+    const fx = await buildSchool();
+    const preview = await teacherAbsenceService.previewCover(fx.school.id, {
+      teacherId: fx.teacher.id,
+      date: MONDAY,
+      periods: [1],
+    });
+    expect(preview.periods[0].class.id).toBe(fx.klass.id);
+    expect(preview.periods[0].free.map((t) => t.id)).toContain(fx.cover.id);
+    expect(await TeacherAbsences.count({ where: { fkTeacherId: fx.teacher.id } })).toBe(0);
+
+    await TimetableSlots.create({
+      fkSchoolId: fx.school.id,
+      fkClassId: fx.klass.id,
+      fkTeacherId: fx.cover.id,
+      fkSubjectId: fx.subject.id,
+      day: "Monday",
+      periodIndex: 2,
+    });
+    await TimetableSlots.create({
+      fkSchoolId: fx.school.id,
+      fkClassId: fx.klass.id,
+      fkTeacherId: fx.teacher.id,
+      fkSubjectId: fx.subject.id,
+      day: "Monday",
+      periodIndex: 3,
+    });
+    await expect(
+      teacherAbsenceService.markAbsentWithCover(fx.actor, {
+        teacherId: fx.teacher.id,
+        date: MONDAY,
+        periods: [1, 3],
+        assignments: [
+          { periodIndex: 1, substituteTeacherId: fx.cover.id },
+          { periodIndex: 3, substituteTeacherId: fx.teacher.id },
+        ],
+      }),
+    ).rejects.toMatchObject({ statusCode: 400 });
+    expect(await TeacherAbsences.count({ where: { fkTeacherId: fx.teacher.id } })).toBe(0);
+
+    const saved = await teacherAbsenceService.markAbsentWithCover(fx.actor, {
+      teacherId: fx.teacher.id,
+      date: MONDAY,
+      periods: [1, 3],
+      assignments: [{ periodIndex: 1, substituteTeacherId: fx.cover.id }],
+    });
+    expect(saved.assigned).toBe(1);
+    expect(saved.absences.map((row) => [row.periodIndex, row.status])).toEqual([
+      [1, "Covered"],
+      [3, "Pending"],
+    ]);
+
+    const busyPreview = await teacherAbsenceService.previewCover(fx.school.id, {
+      teacherId: fx.teacher.id,
+      date: MONDAY,
+      periods: [2],
+    });
+    expect(busyPreview.periods[0].class).toBeNull();
   });
 
   test("a daily lesson is stored as submitted and keeps classwork and the chapter link", async () => {

@@ -23,15 +23,20 @@ const {
   SETTING_KEYS,
 } = require("../constants");
 const ApiError = require("../utils/ApiError");
+const { syncClassStatus } = require("./class.service");
 const settingsService = require("./settings.service");
 const feeService = require("./fee.service");
 const auditService = require("./audit.service");
-const r2Service = require("./r2.service");
+const storageService = require("./storage.service");
+const accessService = require("./access.service");
+const { admissionDocumentKeyPattern } = require("./upload_policy.service");
+const { can } = require("../constants/permissions");
 const {
   isValidPhonePk,
   normalizePhonePk,
 } = require("../utils/pakistan");
 const { resolveAdmissionUiStatus } = require("../utils/admissionUiStatus");
+const { interviewDateRange } = require("../utils/dates");
 
 const RELATIONS = new Set(["Father", "Mother", "Guardian", "Other"]);
 const PLACEHOLDER_FILE = "pending://local";
@@ -196,10 +201,7 @@ async function columnsFrom(schoolId, data, transaction) {
   }
   if (data.interviewDate !== undefined && data.interviewDate) {
     const d = String(data.interviewDate).slice(0, 10);
-    const min = new Date().toISOString().slice(0, 10);
-    const maxDate = new Date();
-    maxDate.setMonth(maxDate.getMonth() + 18);
-    const max = maxDate.toISOString().slice(0, 10);
+    const { min, max } = interviewDateRange();
     if (d < min || d > max) {
       throw new ApiError(
         400,
@@ -220,37 +222,45 @@ async function currentSessionId(schoolId, transaction) {
   return session.id;
 }
 
+/**
+ * The stored file reference for one document row. Uploaded files are R2
+ * object keys under `admissions/<id>/documents/`; a key for any other
+ * application is refused so one record can't point at another's file.
+ */
+function documentFileRef(applicationId, doc, status) {
+  if (status === "Pending") return null;
+  const value = doc.fileUrl ? String(doc.fileUrl) : "";
+  if (!value) return PLACEHOLDER_FILE;
+  if (/^(https?|pending):\/\//.test(value)) return value;
+  if (!admissionDocumentKeyPattern(applicationId).test(value)) {
+    throw new ApiError(400, "That file does not belong to this application.");
+  }
+  return value;
+}
+
 async function syncDocuments(applicationId, documents, transaction) {
   if (!Array.isArray(documents)) return;
+  const replaced = [];
   for (const doc of documents) {
     const label = doc.label || doc.title;
     if (!label) continue;
     const status = doc.status || "Pending";
-    let fileUrl = null;
-    if (status !== "Pending") {
-      if (doc.fileUrl && String(doc.fileUrl).startsWith("http")) {
-        fileUrl = doc.fileUrl;
-      } else {
-        fileUrl = doc.fileUrl || PLACEHOLDER_FILE;
-      }
-    }
-    if (doc.id) {
-      await ApplicationDocuments.update(
-        { title: label, status, ...(fileUrl ? { fileUrl } : {}) },
-        { where: { id: doc.id, fkApplicationId: applicationId }, transaction },
-      );
-    } else {
+    const fileUrl = documentFileRef(applicationId, doc, status);
+    const existing = doc.id
+      ? await ApplicationDocuments.findOne({ where: { id: doc.id, fkApplicationId: applicationId }, transaction })
+      : null;
+    if (existing) {
+      if (storageService.isObjectKey(existing.fileUrl) && existing.fileUrl !== fileUrl) replaced.push(existing.fileUrl);
+      await existing.update({ title: label, status, fileUrl }, { transaction });
+    } else if (!doc.id) {
       await ApplicationDocuments.create(
-        {
-          fkApplicationId: applicationId,
-          title: label,
-          status,
-          fileUrl,
-          documentType: doc.documentType || "admission",
-        },
+        { fkApplicationId: applicationId, title: label, status, fileUrl, documentType: doc.documentType || "admission" },
         { transaction },
       );
     }
+  }
+  if (replaced.length) {
+    transaction.afterCommit(() => Promise.all(replaced.map((key) => storageService.deleteObject(key))));
   }
 }
 
@@ -322,29 +332,26 @@ async function statusSummary(schoolId) {
   return counts;
 }
 
-async function presignDocumentUpload(
-  id,
-  schoolId,
-  { documentId, contentType, fileName },
-) {
-  const row = await getById(id, schoolId);
-  assertEditable(row);
-  const doc = await ApplicationDocuments.findOne({
-    where: { id: documentId, fkApplicationId: id },
-  });
+/**
+ * Short-lived signed link to one admission document. Staff who manage
+ * admissions see their own school's files; a parent only sees documents of
+ * an application that became their own child. Everyone else gets 403.
+ */
+async function documentDownloadUrl(user, id, documentId) {
+  const app = await Applications.findOne({ where: { id, fkSchoolId: user.schoolId } });
+  if (!app) throw new ApiError(404, "Application not found");
+  if (user.role === USER_ROLES.PARENT) {
+    const children = await accessService.linkedStudentIds(user);
+    if (!app.enrolledStudentId || !children.includes(app.enrolledStudentId)) {
+      throw new ApiError(403, "This document is not linked to your account.");
+    }
+  } else if (!can(user.role, "admissions.manage")) {
+    throw new ApiError(403, "Access Denied. You don't have permission.");
+  }
+  const doc = await ApplicationDocuments.findOne({ where: { id: documentId, fkApplicationId: app.id } });
   if (!doc) throw new ApiError(404, "Document not found");
-  const safeName = String(fileName || "file")
-    .replace(/[^a-zA-Z0-9._-]/g, "_")
-    .slice(0, 120);
-  const key = `schools/${schoolId}/applications/${id}/${documentId}-${Date.now()}-${safeName}`;
-  const presigned = await r2Service.createPresignedUpload({
-    key,
-    contentType,
-  });
-  return {
-    documentId: doc.id,
-    ...presigned,
-  };
+  if (!storageService.isObjectKey(doc.fileUrl)) throw new ApiError(404, "No file has been uploaded for this document.");
+  return storageService.signedDownloadUrl(doc.fileUrl);
 }
 
 async function clearDocumentFile(id, schoolId, documentId) {
@@ -356,7 +363,9 @@ async function clearDocumentFile(id, schoolId, documentId) {
       transaction: t,
     });
     if (!doc) throw new ApiError(404, "Document not found");
+    const previousKey = doc.fileUrl;
     await doc.update({ status: "Pending", fileUrl: null }, { transaction: t });
+    t.afterCommit(() => storageService.isObjectKey(previousKey) && storageService.deleteObject(previousKey));
     return getById(id, schoolId, { transaction: t });
   });
 }
@@ -640,6 +649,7 @@ async function enroll(id, schoolId, { admissionNo } = {}, actor) {
       },
       { transaction: t },
     );
+    await syncClassStatus(klass.id, t);
     const parentUser = await linkGuardian(schoolId, app, student, t);
     await feeService.openLedger(schoolId, student, t);
     await app.update(
@@ -687,6 +697,6 @@ module.exports = {
   markUnderReview,
   decide,
   enroll,
-  presignDocumentUpload,
+  documentDownloadUrl,
   clearDocumentFile,
 };

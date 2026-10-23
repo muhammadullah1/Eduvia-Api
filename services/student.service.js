@@ -5,6 +5,7 @@ const { Students, Classes, Parents, Users, StudentStatusEvents, StudentPromotion
 const { STUDENT_STATUS } = require("../constants");
 const ApiError = require("../utils/ApiError");
 const auditService = require("./audit.service");
+const { syncClassStatus } = require("./class.service");
 
 /**
  * `scope` narrows rows for restricted roles: parents get their linked
@@ -70,7 +71,11 @@ async function getById(id, schoolId) {
 }
 
 async function create(schoolId, data) {
-  return Students.create({ ...data, fkSchoolId: schoolId });
+  return sequelize.transaction(async (transaction) => {
+    const row = await Students.create({ ...data, fkSchoolId: schoolId }, { transaction });
+    await syncClassStatus(row.fkClassId, transaction);
+    return row;
+  });
 }
 
 async function update(id, schoolId, data) {
@@ -78,7 +83,12 @@ async function update(id, schoolId, data) {
     throw new ApiError(400, "Record a status change with a reason and a date");
   }
   const row = await getById(id, schoolId);
-  await row.update(data);
+  const previousClassId = row.fkClassId;
+  await sequelize.transaction(async (transaction) => {
+    await row.update(data, { transaction });
+    // A transfer empties one class and fills another.
+    if (row.fkClassId !== previousClassId) await syncClassStatus([previousClassId, row.fkClassId], transaction);
+  });
   return getById(id, schoolId);
 }
 
@@ -121,6 +131,7 @@ async function changeStatus(actor, id, { status, reason, effectiveOn, finalResul
       financialStatus: financial,
     }, { transaction });
     await student.update({ status }, { transaction });
+    await syncClassStatus(student.fkClassId, transaction);
     await auditService.record(actor, `changed student #${student.id} status from ${previous} to ${status}`, {
       entityType: "student",
       entityId: student.id,
@@ -157,6 +168,7 @@ async function promote(actor, id, { classId, sessionId, date }) {
       fkActorUserId: actor.id,
     }, { transaction });
     await student.update({ fkClassId: nextClass.id }, { transaction });
+    await syncClassStatus([previousClassId, nextClass.id], transaction);
     await auditService.record(actor, `promoted student #${student.id} to class #${nextClass.id}`, {
       entityType: "student",
       entityId: student.id,
@@ -169,7 +181,10 @@ async function promote(actor, id, { classId, sessionId, date }) {
 async function remove(id, schoolId) {
   const row = await Students.findOne({ where: { id, fkSchoolId: schoolId } });
   if (!row) throw new ApiError(404, "Student not found");
-  await row.destroy();
+  await sequelize.transaction(async (transaction) => {
+    await row.destroy({ transaction });
+    await syncClassStatus(row.fkClassId, transaction);
+  });
   return true;
 }
 

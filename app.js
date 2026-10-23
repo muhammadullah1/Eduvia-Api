@@ -2,6 +2,7 @@ const express = require("express");
 const cors = require("cors");
 const bodyParser = require("body-parser");
 const helmet = require("helmet");
+const cookieParser = require("cookie-parser");
 const router = require("./routes");
 const ApiError = require("./utils/ApiError");
 const { UniqueConstraintError, ValidationError } = require("sequelize");
@@ -22,6 +23,7 @@ app.use(
     parameterLimit: 50000,
   }),
 );
+app.use(cookieParser());
 app.use(logger.requestLogger);
 
 app.use(

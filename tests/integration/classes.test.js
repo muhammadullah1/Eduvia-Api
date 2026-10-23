@@ -1,6 +1,7 @@
 "use strict";
 
 const classService = require("../../services/class.service");
+const studentService = require("../../services/student.service");
 const { sequelize, Schools, AcademicSessions, Classes } = require("../../models");
 
 async function buildFixture() {
@@ -203,4 +204,25 @@ describe("class service", () => {
     expect(active.some((row) => row.id === created.id)).toBe(true);
   });
 
+  test("a class starts inactive, can't be activated without students and can't be deleted with them", async () => {
+    const fx = await buildFixture();
+    const klass = await classService.create(fx.school.id, {
+      fkSessionId: fx.session.id, grade: "Grade 4", section: "Rules", label: "Grade 4 · Rules", periodCount: 8, monthlyFee: 0,
+    });
+    expect(klass.status).toBe("Inactive");
+    // Status is derived from enrolment, never set by hand.
+    const unchanged = await classService.update(klass.id, fx.school.id, { status: "Active", room: "R1" });
+    expect(unchanged.status).toBe("Inactive");
+
+    await studentService.create(fx.school.id, {
+      fkClassId: klass.id, admissionNo: `R-${fx.stamp}`.slice(0, 20),
+      firstName: "Sara", lastName: "Ali", gender: "Female", dateOfBirth: "2018-01-01", admissionDate: "2026-04-01", status: "Active",
+    });
+    expect((await Classes.findByPk(klass.id)).status).toBe("Active");
+    await expect(classService.remove(klass.id, fx.school.id)).rejects.toMatchObject({
+      statusCode: 409,
+      message: "Grade 4 · Rules has 1 enrolled student. Move or withdraw them before deleting the class.",
+    });
+    expect(await Classes.findByPk(klass.id)).not.toBeNull();
+  });
 });

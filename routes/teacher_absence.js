@@ -11,6 +11,8 @@ const manage = authorize("absences.manage");
 
 router.get("/", authorize("absences.read"), validate(v.validateList), c.list);
 router.post("/", manage, validate(v.validateMarkAbsent), c.markAbsent);
+router.get("/cover-preview", manage, validate(v.validateCoverPreview), c.previewCover);
+router.post("/bulk", manage, validate(v.validateBulk), c.markAbsentWithCover);
 router.get("/:id/available-substitutes", manage, validate(v.validateId), c.availableSubstitutes);
 router.put("/:id/substitute", manage, validate(v.validateAssign), c.assignSubstitute);
 router.delete("/:id/substitute", manage, validate(v.validateId), c.removeSubstitute);

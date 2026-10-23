@@ -53,3 +53,44 @@ validations/     Joi schemas
 middlewares/     auth, validate, platform
 database/migrations/
 ```
+
+## File storage (Cloudflare R2)
+
+Files never pass through the API. The browser asks `POST /api/auth/get-presigned-url`
+(`{dirName, fileName, contentType}`) for a 5-minute presigned PUT, uploads directly to R2,
+then saves the returned `objectKey` through the normal JSON endpoints.
+
+- Env: `CLOUDFLARE_R2_ACCOUNT_ID`, `CLOUDFLARE_R2_ACCESS_KEY_ID`, `CLOUDFLARE_R2_SECRET_ACCESS_KEY`,
+  `CLOUDFLARE_R2_BUCKET` (required, else 503), `CLOUDFLARE_R2_ENDPOINT`, optional `CLOUDFLARE_R2_PUBLIC_BASE_URL`.
+- Allowed folders: `avatars` (JPG/PNG) and `admissions/{applicationId}/documents` (images, PDF, Word);
+  file names must be `<uuid>.<ext>`.
+- **The bucket must stay private** (no public r2.dev / custom domain). Admission documents are read via
+  `GET /api/applications/:id/documents/:documentId/url` (role + record checked, 5-minute signed GET);
+  avatars are returned as signed `photoUrl` links (1 hour) in user responses.
+- **CORS:** the bucket's CORS policy must allow `PUT` (and `GET`) with header `Content-Type` from every
+  frontend origin, e.g. `http://localhost:5173` and the production portal URL.
+
+## Production checklist (not applied anywhere yet)
+
+Known frontend deploy: `https://eduvia-delta.vercel.app` (Vercel, `vercel.json` SPA rewrite only).
+No production API URL is configured in either repo; the deployed bundle calls the relative `/api`.
+
+- API env: `NODE_ENV=production`, `ALLOWED_ORIGINS=https://eduvia-delta.vercel.app`,
+  `FRONT_END_URL=https://eduvia-delta.vercel.app`, `JWT_SECRET`, DB vars, the `CLOUDFLARE_R2_*` vars
+  (leave `CLOUDFLARE_R2_PUBLIC_BASE_URL` empty: the bucket is private).
+- Refresh cookie `eduvia_refresh`: httpOnly, `Secure`, `SameSite=None` (production), `Path=/api/auth`, 7 days.
+  Requires HTTPS on the API.
+- Frontend (Vercel env): `VITE_API_URL=<API origin>/api`. Do not set `VITE_R2_PUBLIC_BASE_URL`.
+- R2 bucket CORS (Cloudflare dashboard → R2 → bucket → Settings → CORS policy):
+
+```json
+[
+  {
+    "AllowedOrigins": ["https://eduvia-delta.vercel.app", "http://localhost:5173"],
+    "AllowedMethods": ["PUT", "GET"],
+    "AllowedHeaders": ["Content-Type"],
+    "ExposeHeaders": ["ETag"],
+    "MaxAgeSeconds": 3600
+  }
+]
+```

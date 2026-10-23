@@ -70,51 +70,57 @@ async function getById(id, schoolId, options = {}) {
   return row;
 }
 
+async function markAbsentIn(actor, { teacherId, date, periods, fullDay, notes }, transaction) {
+  const teacher = await Teachers.findOne({ where: { id: teacherId, fkSchoolId: actor.schoolId }, transaction });
+  if (!teacher) throw new ApiError(404, "Teacher not found");
+  const weekday = weekdayOf(date);
+  const slots = await TimetableSlots.findAll({
+    where: { fkSchoolId: actor.schoolId, fkTeacherId: teacher.id, day: weekday },
+    transaction,
+  });
+  const slotByPeriod = new Map(slots.map((s) => [s.periodIndex, s]));
+  const targetPeriods = fullDay ? slots.map((s) => s.periodIndex) : [...new Set(periods || [])];
+  if (!targetPeriods.length) throw new ApiError(400, "No periods to mark: the teacher has no classes that day.");
+
+  const out = [];
+  for (const periodIndex of targetPeriods.sort((a, b) => a - b)) {
+    const slot = slotByPeriod.get(periodIndex);
+    const values = {
+      fkClassId: slot ? slot.fkClassId : null,
+      fkSubjectId: slot ? slot.fkSubjectId : null,
+      fkTimetableSlotId: slot ? slot.id : null,
+      status: slot ? ABSENCE_STATUS.PENDING : ABSENCE_STATUS.NO_CLASS,
+      fkMarkedByUserId: actor.id,
+      notes: notes || null,
+    };
+    const existing = await TeacherAbsences.findOne({ where: { fkTeacherId: teacher.id, date, periodIndex }, transaction });
+    if (existing && existing.status !== ABSENCE_STATUS.CANCELLED) {
+      out.push(existing);
+      continue;
+    }
+    out.push(
+      existing
+        ? await existing.update(values, { transaction })
+        : await TeacherAbsences.create({ ...values, fkSchoolId: actor.schoolId, fkTeacherId: teacher.id, date, periodIndex }, { transaction }),
+    );
+  }
+  await auditService.record(
+    actor,
+    `marked teacher #${teacher.id} absent on ${date} (periods ${targetPeriods.join(", ")})`,
+    { entityType: "teacher", entityId: teacher.id, metadata: { date, periods: targetPeriods } },
+    { transaction },
+  );
+  return out;
+}
+
 /**
  * Mark a teacher absent for specific periods or the whole day (UR-03 §5.1).
  * Each period is linked to the class the timetable says they teach then;
  * periods without a class are recorded as NoClass (nothing to cover).
  */
-async function markAbsent(actor, { teacherId, date, periods, fullDay, notes }) {
-  const teacher = await Teachers.findOne({ where: { id: teacherId, fkSchoolId: actor.schoolId } });
-  if (!teacher) throw new ApiError(404, "Teacher not found");
-  const weekday = weekdayOf(date);
-  const slots = await TimetableSlots.findAll({ where: { fkSchoolId: actor.schoolId, fkTeacherId: teacher.id, day: weekday } });
-  const slotByPeriod = new Map(slots.map((s) => [s.periodIndex, s]));
-  const targetPeriods = fullDay ? slots.map((s) => s.periodIndex) : [...new Set(periods || [])];
-  if (!targetPeriods.length) throw new ApiError(400, "No periods to mark: the teacher has no classes that day.");
-
-  const ids = await sequelize.transaction(async (transaction) => {
-    const out = [];
-    for (const periodIndex of targetPeriods.sort((a, b) => a - b)) {
-      const slot = slotByPeriod.get(periodIndex);
-      const values = {
-        fkClassId: slot ? slot.fkClassId : null,
-        fkSubjectId: slot ? slot.fkSubjectId : null,
-        fkTimetableSlotId: slot ? slot.id : null,
-        status: slot ? ABSENCE_STATUS.PENDING : ABSENCE_STATUS.NO_CLASS,
-        fkMarkedByUserId: actor.id,
-        notes: notes || null,
-      };
-      const existing = await TeacherAbsences.findOne({ where: { fkTeacherId: teacher.id, date, periodIndex }, transaction });
-      if (existing && existing.status !== ABSENCE_STATUS.CANCELLED) {
-        out.push(existing.id);
-        continue;
-      }
-      const row = existing
-        ? await existing.update(values, { transaction })
-        : await TeacherAbsences.create({ ...values, fkSchoolId: actor.schoolId, fkTeacherId: teacher.id, date, periodIndex }, { transaction });
-      out.push(row.id);
-    }
-    await auditService.record(
-      actor,
-      `marked teacher #${teacher.id} absent on ${date} (periods ${targetPeriods.join(", ")})`,
-      { entityType: "teacher", entityId: teacher.id, metadata: { date, periods: targetPeriods } },
-      { transaction },
-    );
-    return out;
-  });
-  return TeacherAbsences.findAll({ where: { id: ids }, include: absenceInclude, order: [["periodIndex", "ASC"]] });
+async function markAbsent(actor, body) {
+  const rows = await sequelize.transaction((transaction) => markAbsentIn(actor, body, transaction));
+  return TeacherAbsences.findAll({ where: { id: rows.map((row) => row.id) }, include: absenceInclude, order: [["periodIndex", "ASC"]] });
 }
 
 async function busyAt(schoolId, date, periodIndex, transaction) {
@@ -163,78 +169,164 @@ async function availableSubstitutes(schoolId, absenceId) {
   return { absence, teachers: free };
 }
 
+/** Assign one substitute inside the caller's transaction (see assignSubstitute). */
+async function assignIn(actor, absenceId, { substituteTeacherId, notes }, transaction) {
+  const absence = await TeacherAbsences.findOne({
+    where: { id: absenceId, fkSchoolId: actor.schoolId },
+    transaction,
+    lock: transaction.LOCK.UPDATE,
+  });
+  if (!absence) throw new ApiError(404, "Absence not found");
+  if (!absence.fkClassId || absence.status === ABSENCE_STATUS.CANCELLED || absence.status === ABSENCE_STATUS.NO_CLASS) {
+    throw new ApiError(400, "This absence has no class to cover.");
+  }
+  if (substituteTeacherId === absence.fkTeacherId) throw new ApiError(400, "A teacher cannot substitute for themselves.");
+  await sequelize.query("SELECT pg_advisory_xact_lock(hashtext(:key))", {
+    replacements: { key: `substitute:${actor.schoolId}:${absence.date}:${absence.periodIndex}` },
+    transaction,
+  });
+  const substitute = await Teachers.findOne({
+    where: { id: substituteTeacherId, fkSchoolId: actor.schoolId },
+    include: [{ model: Users, as: "user", attributes: ["firstName", "lastName"] }],
+    transaction,
+  });
+  if (!substitute) throw new ApiError(404, "Substitute teacher not found");
+
+  const previous = await SubstituteAssignments.findOne({ where: { fkAbsenceId: absence.id }, transaction });
+  if (previous && previous.fkSubstituteTeacherId === substitute.id) return;
+  if (previous) await previous.destroy({ transaction });
+
+  const busy = await busyAt(actor.schoolId, absence.date, absence.periodIndex, transaction);
+  if (busy.has(substitute.id)) {
+    throw new ApiError(409, `${teacherName(substitute)} already has a class in period ${absence.periodIndex} on ${absence.date}.`);
+  }
+  const assignment = await SubstituteAssignments.create(
+    {
+      fkSchoolId: actor.schoolId,
+      fkAbsenceId: absence.id,
+      fkTimetableSlotId: absence.fkTimetableSlotId,
+      date: absence.date,
+      periodIndex: absence.periodIndex,
+      fkClassId: absence.fkClassId,
+      fkSubjectId: absence.fkSubjectId,
+      fkOriginalTeacherId: absence.fkTeacherId,
+      fkSubstituteTeacherId: substitute.id,
+      fkAuthorizedByUserId: actor.id,
+      notes: notes || null,
+    },
+    { transaction },
+  );
+  await absence.update({ status: ABSENCE_STATUS.COVERED }, { transaction });
+  await auditService.record(
+    actor,
+    `assigned ${teacherName(substitute)} to cover period ${absence.periodIndex} on ${absence.date}`,
+    {
+      entityType: "substitute_assignment",
+      entityId: assignment.id,
+      metadata: {
+        absenceId: absence.id,
+        originalTeacherId: absence.fkTeacherId,
+        substituteTeacherId: substitute.id,
+        classId: absence.fkClassId,
+        subjectId: absence.fkSubjectId,
+        replacedSubstituteId: previous ? previous.fkSubstituteTeacherId : null,
+      },
+    },
+    { transaction },
+  );
+}
+
 /**
  * Assign the picked substitute (§5.4). Runs in a transaction that serialises
  * on date+period and re-checks availability, so two managers cannot give the
  * same teacher two classes at once; a busy teacher is rejected with 409.
  */
-async function assignSubstitute(actor, absenceId, { substituteTeacherId, notes }) {
-  await sequelize.transaction(async (transaction) => {
-    const absence = await TeacherAbsences.findOne({
-      where: { id: absenceId, fkSchoolId: actor.schoolId },
-      transaction,
-      lock: transaction.LOCK.UPDATE,
-    });
-    if (!absence) throw new ApiError(404, "Absence not found");
-    if (!absence.fkClassId || absence.status === ABSENCE_STATUS.CANCELLED || absence.status === ABSENCE_STATUS.NO_CLASS) {
-      throw new ApiError(400, "This absence has no class to cover.");
-    }
-    if (substituteTeacherId === absence.fkTeacherId) throw new ApiError(400, "A teacher cannot substitute for themselves.");
-    await sequelize.query("SELECT pg_advisory_xact_lock(hashtext(:key))", {
-      replacements: { key: `substitute:${actor.schoolId}:${absence.date}:${absence.periodIndex}` },
-      transaction,
-    });
-    const substitute = await Teachers.findOne({
-      where: { id: substituteTeacherId, fkSchoolId: actor.schoolId },
-      include: [{ model: Users, as: "user", attributes: ["firstName", "lastName"] }],
-      transaction,
-    });
-    if (!substitute) throw new ApiError(404, "Substitute teacher not found");
-
-    const previous = await SubstituteAssignments.findOne({ where: { fkAbsenceId: absence.id }, transaction });
-    if (previous && previous.fkSubstituteTeacherId === substitute.id) return;
-    if (previous) await previous.destroy({ transaction });
-
-    const busy = await busyAt(actor.schoolId, absence.date, absence.periodIndex, transaction);
-    if (busy.has(substitute.id)) {
-      throw new ApiError(409, `${teacherName(substitute)} already has a class in period ${absence.periodIndex} on ${absence.date}.`);
-    }
-    const assignment = await SubstituteAssignments.create(
-      {
-        fkSchoolId: actor.schoolId,
-        fkAbsenceId: absence.id,
-        fkTimetableSlotId: absence.fkTimetableSlotId,
-        date: absence.date,
-        periodIndex: absence.periodIndex,
-        fkClassId: absence.fkClassId,
-        fkSubjectId: absence.fkSubjectId,
-        fkOriginalTeacherId: absence.fkTeacherId,
-        fkSubstituteTeacherId: substitute.id,
-        fkAuthorizedByUserId: actor.id,
-        notes: notes || null,
-      },
-      { transaction },
-    );
-    await absence.update({ status: ABSENCE_STATUS.COVERED }, { transaction });
-    await auditService.record(
-      actor,
-      `assigned ${teacherName(substitute)} to cover period ${absence.periodIndex} on ${absence.date}`,
-      {
-        entityType: "substitute_assignment",
-        entityId: assignment.id,
-        metadata: {
-          absenceId: absence.id,
-          originalTeacherId: absence.fkTeacherId,
-          substituteTeacherId: substitute.id,
-          classId: absence.fkClassId,
-          subjectId: absence.fkSubjectId,
-          replacedSubstituteId: previous ? previous.fkSubstituteTeacherId : null,
-        },
-      },
-      { transaction },
-    );
-  });
+async function assignSubstitute(actor, absenceId, body) {
+  await sequelize.transaction((transaction) => assignIn(actor, absenceId, body, transaction));
   return getById(absenceId, actor.schoolId);
+}
+
+/**
+ * Step 2 of "mark teacher absent", before anything is saved: for each chosen
+ * period, the class it affects and the teachers free to cover it.
+ */
+async function previewCover(schoolId, { teacherId, date, periods }) {
+  const teacher = await Teachers.findOne({ where: { id: teacherId, fkSchoolId: schoolId } });
+  if (!teacher) throw new ApiError(404, "Teacher not found");
+  const slots = await TimetableSlots.findAll({
+    where: { fkSchoolId: schoolId, fkTeacherId: teacher.id, day: weekdayOf(date), periodIndex: periods },
+    include: [
+      { model: Classes, as: "class", attributes: ["id", "label"] },
+      { model: Subjects, as: "subject", attributes: ["id", "name"] },
+    ],
+  });
+  const teachers = await Teachers.findAll({
+    where: { fkSchoolId: schoolId, id: { [Op.ne]: teacher.id } },
+    include: [
+      { model: Users, as: "user", attributes: ["firstName", "lastName"] },
+      { model: Subjects, as: "subject", attributes: ["id", "name"] },
+    ],
+  });
+  const slotByPeriod = new Map(slots.map((slot) => [slot.periodIndex, slot]));
+  const out = [];
+  for (const periodIndex of [...new Set(periods)].sort((a, b) => a - b)) {
+    const slot = slotByPeriod.get(periodIndex);
+    if (!slot) {
+      out.push({ periodIndex, class: null, subject: null, free: [] });
+      continue;
+    }
+    const busy = await busyAt(schoolId, date, periodIndex);
+    out.push({
+      periodIndex,
+      class: slot.class,
+      subject: slot.subject,
+      free: teachers
+        .filter((t) => !busy.has(t.id))
+        .map((t) => ({ id: t.id, name: teacherName(t), subject: t.subject, sameSubject: t.fkSubjectId === slot.fkSubjectId }))
+        .sort((a, b) => Number(b.sameSubject) - Number(a.sameSubject) || a.name.localeCompare(b.name)),
+    });
+  }
+  return { teacher: { id: teacher.id }, date, periods: out };
+}
+
+/**
+ * Mark the teacher absent and assign every picked substitute in ONE
+ * transaction: if any assignment is rejected (e.g. the cover teacher was just
+ * booked elsewhere) nothing is saved. Each step is audit-logged.
+ */
+async function markAbsentWithCover(actor, { teacherId, date, periods, notes, assignments = [] }) {
+  const picked = new Map(assignments.map((item) => [item.periodIndex, item.substituteTeacherId]));
+  for (const periodIndex of picked.keys()) {
+    if (!periods.includes(periodIndex)) throw new ApiError(400, `Period ${periodIndex} is not one of the absent periods.`);
+  }
+  const ids = await sequelize.transaction(async (transaction) => {
+    const absences = await markAbsentIn(actor, { teacherId, date, periods, notes }, transaction);
+    for (const absence of absences) {
+      const substituteTeacherId = picked.get(absence.periodIndex);
+      if (substituteTeacherId) await assignIn(actor, absence.id, { substituteTeacherId, notes }, transaction);
+    }
+    return absences.map((absence) => absence.id);
+  });
+  const rows = await TeacherAbsences.findAll({ where: { id: ids }, include: absenceInclude, order: [["periodIndex", "ASC"]] });
+  return { absences: rows, assigned: picked.size };
+}
+
+/**
+ * Releases the live cover of one absence (one period): marked Cancelled, then
+ * soft-deleted so the substitute is free for that period again. Other
+ * absences' covers are never touched.
+ */
+async function releaseCover(actor, absence, reason, transaction) {
+  const cover = await activeSubstitutionFor(absence.id, transaction);
+  if (!cover) return null;
+  await cover.update({ status: "Cancelled" }, { transaction });
+  await cover.destroy({ transaction });
+  await auditService.record(actor, `released substitute for absence #${absence.id} (${reason})`, {
+    entityType: "substitute_assignment",
+    entityId: cover.id,
+    metadata: { absenceId: absence.id, substituteTeacherId: cover.fkSubstituteTeacherId, date: cover.date, periodIndex: cover.periodIndex },
+  }, { transaction });
+  return cover;
 }
 
 async function removeSubstitute(actor, absenceId) {
@@ -245,14 +337,9 @@ async function removeSubstitute(actor, absenceId) {
       lock: transaction.LOCK.UPDATE,
     });
     if (!absence) throw new ApiError(404, "Absence not found");
-    const cover = await activeSubstitutionFor(absenceId, transaction);
+    const cover = await releaseCover(actor, absence, "substitute removed", transaction);
     if (!cover) throw new ApiError(400, "No substitute assigned.");
-    await cover.destroy({ transaction });
     await absence.update({ status: ABSENCE_STATUS.PENDING }, { transaction });
-    await auditService.record(actor, `removed substitute from absence #${absence.id}`, {
-      entityType: "substitute_assignment",
-      entityId: cover.id,
-    }, { transaction });
   });
   return getById(absenceId, actor.schoolId);
 }
@@ -265,12 +352,22 @@ async function cancel(actor, absenceId) {
       lock: transaction.LOCK.UPDATE,
     });
     if (!absence) throw new ApiError(404, "Absence not found");
-    const cover = await activeSubstitutionFor(absenceId, transaction);
-    if (cover) await cover.destroy({ transaction });
+    if (absence.status === ABSENCE_STATUS.CANCELLED) throw new ApiError(400, "This absence is already cancelled.");
+    await releaseCover(actor, absence, "absence cancelled", transaction);
     await absence.update({ status: ABSENCE_STATUS.CANCELLED }, { transaction });
     await auditService.record(actor, `cancelled absence #${absence.id}`, { entityType: "teacher_absence", entityId: absence.id }, { transaction });
   });
   return getById(absenceId, actor.schoolId);
 }
 
-module.exports = { list, getById, markAbsent, availableSubstitutes, assignSubstitute, removeSubstitute, cancel };
+module.exports = {
+  list,
+  getById,
+  markAbsent,
+  previewCover,
+  markAbsentWithCover,
+  availableSubstitutes,
+  assignSubstitute,
+  removeSubstitute,
+  cancel,
+};

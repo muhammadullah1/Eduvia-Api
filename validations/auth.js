@@ -3,6 +3,13 @@
 const Joi = require("joi");
 
 module.exports = {
+  validatePresignedUrl: {
+    body: Joi.object({
+      dirName: Joi.string().trim().max(100).required(),
+      fileName: Joi.string().trim().max(255).required(),
+      contentType: Joi.string().trim().max(100).required(),
+    }),
+  },
   validateLogin: {
     body: Joi.object({
       email: Joi.string().email().required(),

@@ -44,6 +44,7 @@ router.use("/attendances", attendanceRouter);
 router.use("/fees", feeRouter);
 router.use("/expenses", expenseRouter);
 router.use("/updates", noticeRouter);
+router.use("/system-notices", require("./system_notice"));
 router.use("/exams", examRouter);
 router.use("/timetable", timetableRouter);
 router.use("/teacher-absences", teacherAbsenceRouter);

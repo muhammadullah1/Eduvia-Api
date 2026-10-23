@@ -44,8 +44,39 @@ function datesForWeekday(month, weekday) {
   return out;
 }
 
-function today() {
-  return iso(new Date());
+/** The school's calendar day, from the server's local clock (not UTC). */
+function today(now = new Date()) {
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
 }
 
-module.exports = { parse, iso, weekdayOf, monthKey, firstOfMonth, addMonths, weekOfMonth, datesForWeekday, today };
+/** `YYYY-MM-DD` plus whole months, clamped to the month's last day. */
+function addMonthsToDate(date, count) {
+  const d = parse(date);
+  const day = d.getUTCDate();
+  d.setUTCDate(1);
+  d.setUTCMonth(d.getUTCMonth() + count);
+  const last = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)).getUTCDate();
+  d.setUTCDate(Math.min(day, last));
+  return iso(d);
+}
+
+/** Interviews are booked from today up to 18 months ahead. */
+function interviewDateRange(now = new Date()) {
+  const min = today(now);
+  return { min, max: addMonthsToDate(min, 18) };
+}
+
+module.exports = {
+  parse,
+  iso,
+  weekdayOf,
+  monthKey,
+  firstOfMonth,
+  addMonths,
+  addMonthsToDate,
+  weekOfMonth,
+  datesForWeekday,
+  today,
+  interviewDateRange,
+};

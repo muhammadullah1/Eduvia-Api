@@ -2,6 +2,19 @@
 
 const { userService } = require("../services");
 const { buildPagination } = require("../utils");
+const storageService = require("../services/storage.service");
+
+/** Avatars live in the private bucket: attach a signed link for display. */
+async function withPhotoUrl(user) {
+  const json = typeof user.toJSON === "function" ? user.toJSON() : { ...user };
+  json.photoUrl = null;
+  if (storageService.isObjectKey(json.photo) && storageService.storageConfig()) {
+    json.photoUrl = (await storageService.signedDownloadUrl(json.photo, AVATAR_LINK_SECONDS)).url;
+  }
+  return json;
+}
+
+const AVATAR_LINK_SECONDS = 3600;
 
 module.exports = {
   list: async (req, res, next) => {
@@ -17,16 +30,8 @@ module.exports = {
       res.status(200).json({
         success: true,
         message: "Users",
-        data: buildPagination(result.rows, result.count, result.page, result.pageSize, "users"),
+        data: buildPagination(await Promise.all(result.rows.map(withPhotoUrl)), result.count, result.page, result.pageSize, "users"),
       });
-    } catch (err) {
-      next(err);
-    }
-  },
-  presignPhoto: async (req, res, next) => {
-    try {
-      const data = await userService.presignStaffPhoto(req.user, req.body);
-      res.status(200).json({ success: true, message: "Upload URL", data });
     } catch (err) {
       next(err);
     }

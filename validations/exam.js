@@ -8,11 +8,27 @@ const isoDate = Joi.string().pattern(/^\d{4}-\d{2}-\d{2}$/);
 
 const clock = Joi.string().pattern(/^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/);
 
+/** Paper totals are whole numbers from 1 to 1000; passing can't exceed the total. */
+const PAPER_TOTAL_MAX = 1000;
+const examName = Joi.string().trim().min(3).max(100).messages({
+  "string.min": "Exam name must be at least 3 characters.",
+  "string.max": "Exam name must be at most 100 characters.",
+  "string.empty": "Give the exam a name.",
+});
+
 const papers = Joi.array().items(Joi.object({
   classId: id.required(),
   subjectId: id.required(),
-  totalMarks: Joi.number().positive().max(1000).required(),
-  passingMarks: Joi.number().min(0).max(1000).required(),
+  totalMarks: Joi.number().integer().min(1).max(PAPER_TOTAL_MAX).required().messages({
+    "number.base": "Total marks must be a number.",
+    "number.integer": "Total marks must be a whole number.",
+    "number.min": `Total marks must be between 1 and ${PAPER_TOTAL_MAX}.`,
+    "number.max": `Total marks must be between 1 and ${PAPER_TOTAL_MAX}.`,
+  }),
+  passingMarks: Joi.number().min(0).max(Joi.ref("totalMarks")).required().messages({
+    "number.base": "Passing marks must be a number.",
+    "number.max": "Passing marks can't be more than the paper's total marks.",
+  }),
   paperDate: isoDate.allow(null, ""),
   startTime: clock.allow(null, ""),
   endTime: clock.allow(null, ""),
@@ -31,7 +47,7 @@ module.exports = {
   },
   validateCreate: {
     body: Joi.object({
-      name: Joi.string().max(100).required(),
+      name: examName.required(),
       examType: examType.required(),
       sessionId: id.required(),
       startDate: isoDate.required(),
@@ -43,7 +59,7 @@ module.exports = {
   validateUpdate: {
     ...idParam,
     body: Joi.object({
-      name: Joi.string().max(100),
+      name: examName,
       examType,
       sessionId: id,
       startDate: isoDate.allow(null),
@@ -58,7 +74,9 @@ module.exports = {
       rows: Joi.array()
         .items(Joi.object({
           studentId: id.required(),
-          score: Joi.number().min(0).allow(null),
+          score: Joi.number().min(0).max(PAPER_TOTAL_MAX).allow(null).messages({
+            "number.base": "Marks must be a number.",
+          }),
           absent: Joi.boolean(),
           exempt: Joi.boolean(),
         }))

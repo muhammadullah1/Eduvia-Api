@@ -15,10 +15,10 @@ const {
 } = require("../models");
 const { isValidPhonePk, normalizePhonePk } = require("../utils/pakistan");
 const authService = require("./auth.service");
-const r2Service = require("./r2.service");
 const { today } = require("../utils/dates");
 const { USER_ROLES, USER_STATUS } = require("../constants");
 const ApiError = require("../utils/ApiError");
+const storageService = require("./storage.service");
 
 const defaultExcludePassword = { attributes: { exclude: ["password"] } };
 
@@ -142,9 +142,7 @@ async function createStaffUser(actor, payload) {
   }
 
   const code = employeeCode ? String(employeeCode).trim() : "";
-  const secret = password && String(password).length >= 8
-    ? String(password)
-    : crypto.randomBytes(32).toString("hex");
+  const secret = password ? String(password) : crypto.randomBytes(32).toString("hex");
   const hashed = await bcrypt.hash(secret, await bcrypt.genSalt(10));
 
   let json;
@@ -199,6 +197,8 @@ async function createStaffUser(actor, payload) {
     throw err;
   }
 
+  // With an admin-set password the account is ready; otherwise email a link to set one.
+  if (password) return json;
   const school = await Schools.findByPk(schoolId, { attributes: ["name"] });
   try {
     await authService.sendUserInvitation(user, role, school?.name);
@@ -241,7 +241,11 @@ async function updateStaffUser(actor, userId, payload) {
   if (Object.keys(updates).length === 0) {
     throw new ApiError(400, "No changes to save.");
   }
+  const previousPhoto = user.photo;
   await user.update(updates);
+  if (updates.photo !== undefined && previousPhoto !== updates.photo && storageService.isObjectKey(previousPhoto)) {
+    await storageService.deleteObject(previousPhoto);
+  }
   const json = user.toJSON();
   delete json.password;
   return json;
@@ -315,24 +319,6 @@ async function restoreStaffUser(actor, userId) {
   return json;
 }
 
-const PHOTO_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
-const PHOTO_MAX_BYTES = 2 * 1024 * 1024;
-
-async function presignStaffPhoto(actor, { contentType, fileName }) {
-  const type = String(contentType || "");
-  const ext = type === "image/png" ? "png" : type === "image/webp" ? "webp" : "jpg";
-  const safeName = String(fileName || "photo")
-    .replace(/[^a-zA-Z0-9._-]/g, "")
-    .slice(0, 40);
-  const key = `schools/${actor.schoolId}/staff-photos/${crypto.randomUUID()}-${safeName || "photo"}.${ext}`;
-  return r2Service.createPresignedUpload({
-    key,
-    contentType: type,
-    allowedTypes: PHOTO_TYPES,
-    maxBytes: PHOTO_MAX_BYTES,
-  });
-}
-
 async function resendInvitation(actor, userId) {
   const user = await Users.findOne({
     where: { id: userId, fkSchoolId: actor.schoolId },
@@ -357,7 +343,6 @@ module.exports = {
   update,
   listBySchool,
   createStaffUser,
-  presignStaffPhoto,
   updateStaffUser,
   removeStaffUser,
   restoreStaffUser,
