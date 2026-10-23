@@ -36,6 +36,11 @@ module.exports = (sequelize, DataTypes) => {
         type: DataTypes.STRING(50),
         allowNull: true,
       },
+      fkSuperMasterTeacherId: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+        field: "fk_super_master_teacher_id",
+      },
       periodCount: {
         type: DataTypes.INTEGER,
         allowNull: false,
@@ -86,6 +91,10 @@ module.exports = (sequelize, DataTypes) => {
   );
 
   Class.associate = (models) => {
+    Class.belongsTo(models.Teachers, {
+      foreignKey: "fkSuperMasterTeacherId",
+      as: "superMaster",
+    });
     Class.belongsTo(models.Schools, {
       foreignKey: "fkSchoolId",
       as: "school",

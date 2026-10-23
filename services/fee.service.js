@@ -253,7 +253,8 @@ async function allocate(actor, payment, student, manualLines, transaction) {
   await payment.update({ unallocatedAmount: plan.leftover, period: covered.join(", ") || null }, { transaction });
   await auditService.record(
     actor,
-    `allocated receipt ${payment.ref} (${manualLines ? "manual" : "oldest first"}) to ${covered.join(", ") || "no month"}`,
+    // audit_logs.action is VARCHAR(100); a payment spanning several months would overflow it.
+    `allocated receipt ${payment.ref} (${manualLines ? "manual" : "oldest first"}) to ${covered.join(", ") || "no month"}`.slice(0, 100),
     {
       entityType: "fee_payment",
       entityId: payment.id,
@@ -489,6 +490,20 @@ function importCell(row, names) {
   return "";
 }
 
+const IMPORT_HEADER_KEYS = new Set(["admission number", "admission no"]);
+const IMPORT_HEADER_SCAN = 25;
+
+/**
+ * Index of the column-header row: the first row (within the first few) with
+ * an "Admission Number" cell. Branded templates carry the school letterhead
+ * above it; a plain sheet has it in row 1 (index 0, also the fallback).
+ */
+function importHeaderIndex(XLSX, sheet) {
+  const top = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "", blankrows: true }).slice(0, IMPORT_HEADER_SCAN);
+  const found = top.findIndex((cells) => cells.some((cell) => IMPORT_HEADER_KEYS.has(String(cell).trim().toLowerCase())));
+  return found < 0 ? 0 : found;
+}
+
 function importDay(value) {
   if (value instanceof Date && !Number.isNaN(value.getTime())) {
     return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`;
@@ -512,12 +527,14 @@ function importMonth(value) {
 async function importPayments(actor, { contentBase64 }) {
   if (!contentBase64) throw new ApiError(400, "contentBase64 is required");
   let rows;
+  let headerIndex = 0;
   try {
     const XLSX = require("xlsx");
     const book = XLSX.read(Buffer.from(contentBase64, "base64"), { type: "buffer", cellDates: true });
     const sheet = book.Sheets[book.SheetNames[0]];
     if (!sheet) throw new Error("empty");
-    rows = XLSX.utils.sheet_to_json(sheet, { defval: "" });
+    headerIndex = importHeaderIndex(XLSX, sheet);
+    rows = XLSX.utils.sheet_to_json(sheet, { defval: "", range: headerIndex });
   } catch (err) {
     if (err instanceof ApiError) throw err;
     throw new ApiError(400, "The workbook could not be read");
@@ -526,8 +543,8 @@ async function importPayments(actor, { contentBase64 }) {
   const result = { success: 0, skipped: 0, failed: 0, importedAt: new Date().toISOString(), rows: [] };
   for (let index = 0; index < rows.length; index += 1) {
     const source = rows[index];
-    const line = index + 2;
-    const admissionNo = String(importCell(source, ["admission number", "admission no"]) || "").trim();
+    const line = headerIndex + index + 2;
+    const admissionNo = String(importCell(source, [...IMPORT_HEADER_KEYS]) || "").trim();
     const months = String(importCell(source, ["month", "months"]) || "")
       .split(",")
       .map((part) => importMonth(part))

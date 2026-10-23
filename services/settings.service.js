@@ -12,6 +12,7 @@ const KEY_PERMISSION = {
   [SETTING_KEYS.RESULT_VISIBILITY]: "settings.fees.update",
   [SETTING_KEYS.FEES]: "settings.fees.update",
   [SETTING_KEYS.ADMISSION]: "settings.academic.update",
+  [SETTING_KEYS.ATTENDANCE]: "settings.academic.update",
 };
 
 function permissionFor(key) {

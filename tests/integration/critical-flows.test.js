@@ -508,7 +508,7 @@ describe("schema-aligned critical flows", () => {
     })).rejects.toBeInstanceOf(ApiError);
 
     await expect(runValidate(attendanceValidation.validateMark, {
-      body: { classId: 1, date: MONDAY, marks: [{ studentId: 1, status: "Late" }] },
+      body: { classId: 1, date: MONDAY, marks: [{ studentId: 1, status: "HalfDay" }] },
     })).rejects.toBeInstanceOf(ApiError);
   });
 

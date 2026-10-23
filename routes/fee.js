@@ -17,6 +17,8 @@ router.get("/payments/:id/receipt", authorize("fees.payments.read"), validate(v.
 router.post("/payments/:id/confirm", authorize("fees.payments.confirm"), validate(v.validateId), c.confirmPayment);
 router.get("/collections/mine", authorize("fees.collections.mine"), validate(v.validateDay), c.myCollections);
 router.get("/collections", authorize("fees.totals"), validate(v.validateCollections), c.collections);
+router.get("/reports/:kind", authorize("fees.reports"), validate(v.validateReport), c.report);
+router.get("/import-template", authorize("fees.payments.record"), c.importTemplate);
 router.get("/summary", authorize("fees.totals"), validate(v.validateSummary), c.summary);
 
 module.exports = router;

@@ -44,6 +44,8 @@ const PERMISSIONS = {
 
   "attendance.read": [SA, OPS, TCH, PAR],
   "attendance.mark": [SA, OPS, TCH],
+  "attendance.review": [SA, OPS],
+  "attendance.edit": [SA, OPS],
 
   "timetable.read": [SA, OPS, TCH, PAR],
   "timetable.manage": [SA, OPS],
@@ -70,7 +72,7 @@ const PERMISSIONS = {
   "results.override": [SA, OPS],
   "results.parent": [PAR],
 
-  "fees.months.read": [SA, OPS, ACC, PAR],
+  "fees.months.read": [SA, ACC, PAR],
   "fees.months.generate": [SA, ACC],
   "fees.payments.read": [SA, ACC, PAR],
   "fees.payments.record": [SA, ACC],
@@ -78,8 +80,11 @@ const PERMISSIONS = {
   "fees.payments.confirm": [SA],
   "fees.collections.mine": [ACC],
   "fees.totals": [SA],
+  // Fee reports: Super Admin gets every report with totals; the accountant only their own
+  // daily collections without totals (enforced again in fee_report.service).
+  "fees.reports": [SA, ACC],
 
-  "expenses.read": [SA, OPS, ACC],
+  "expenses.read": [SA, ACC],
   "expenses.create": [SA, ACC],
   "expenses.manage": [SA],
 

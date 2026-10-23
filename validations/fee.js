@@ -1,7 +1,7 @@
 "use strict";
 
 const Joi = require("joi");
-const { id, idParam, isoDay, isoMonth } = require("./common");
+const { id, idParam, isoDay, isoMonth, calendarDay, calendarMonth } = require("./common");
 const { PAYMENT_STATUS } = require("../constants");
 
 module.exports = {
@@ -28,6 +28,16 @@ module.exports = {
   validateDay: { query: Joi.object({ date: isoDay }) },
   validateCollections: { query: Joi.object({ date: isoDay, recordedBy: id }) },
   validateSummary: { query: Joi.object({ month: isoMonth }) },
+  validateReport: {
+    params: Joi.object({ kind: Joi.string().valid("daily", "monthly", "class-wise", "student-wise", "outstanding", "advance").required() }),
+    query: Joi.object({
+      from: calendarDay,
+      to: calendarDay,
+      month: calendarMonth,
+      classId: id,
+      format: Joi.string().valid("json", "csv", "xlsx", "pdf").default("json"),
+    }),
+  },
   validateImport: {
     body: Joi.object({
       filename: Joi.string().max(255).required(),
