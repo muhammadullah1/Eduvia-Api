@@ -62,10 +62,11 @@ function assertSubmitted(row) {
 
 async function list(
   schoolId,
-  { status, q, page = 1, pageSize = 10, submitted, hasInterview } = {},
+  { status, q, page = 1, pageSize = 10, submitted, hasInterview, decision } = {},
 ) {
   const where = { fkSchoolId: schoolId };
   if (status) where.status = status;
+  if (decision) where.decision = decision;
 
   if (submitted === "false" || submitted === false) {
     where.submittedOn = null;

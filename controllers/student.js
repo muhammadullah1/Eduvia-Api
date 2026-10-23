@@ -1,6 +1,6 @@
 "use strict";
 
-const { studentService, accessService } = require("../services");
+const { studentService, accessService, promotionService } = require("../services");
 const { USER_ROLES } = require("../constants");
 const { buildPagination } = require("../utils");
 
@@ -59,6 +59,22 @@ module.exports = {
     try {
       const data = await studentService.promote(req.user, req.params.id, req.body);
       res.status(200).json({ success: true, message: "Student promoted", data });
+    } catch (err) {
+      next(err);
+    }
+  },
+  bulkPromote: async (req, res, next) => {
+    try {
+      const data = await promotionService.bulkPromote(req.user, req.body);
+      res.status(200).json({ success: true, message: "Promotion complete", data });
+    } catch (err) {
+      next(err);
+    }
+  },
+  promotionHistory: async (req, res, next) => {
+    try {
+      const data = await promotionService.history(req.user.schoolId, req.query);
+      res.status(200).json({ success: true, message: "Enrollment history", data });
     } catch (err) {
       next(err);
     }

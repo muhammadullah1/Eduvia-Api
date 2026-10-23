@@ -9,6 +9,7 @@ module.exports = {
   subjectService: require("./subject.service"),
   teacherService: require("./teacher.service"),
   studentService: require("./student.service"),
+  promotionService: require("./promotion.service"),
   parentService: require("./parent.service"),
   applicationService: require("./application.service"),
   attendanceService: require("./attendance.service"),

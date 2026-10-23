@@ -46,6 +46,28 @@ module.exports = {
       date: isoDay.required(),
     }),
   },
+  validateBulkPromote: {
+    body: Joi.object({
+      fromClassId: id.required(),
+      toClassId: id.allow(null),
+      holdClassId: id.allow(null),
+      sessionId: id.required(),
+      date: isoDay.required(),
+      graduationResult: Joi.string().trim().max(255).allow("", null),
+      students: Joi.array()
+        .items(Joi.object({ studentId: id.required(), action: Joi.string().valid("promote", "hold", "graduate").required() }))
+        .min(1)
+        .max(500)
+        .required(),
+    }),
+  },
+  validatePromotionHistory: {
+    query: Joi.object({
+      page: Joi.number().integer().min(1).default(1),
+      pageSize: Joi.number().integer().min(1).max(200).default(20),
+      type: Joi.string().valid("Promotion", "Repeat", "Graduation", "New Admission"),
+    }),
+  },
   validateId: {
     params: Joi.object({ id: Joi.number().integer().required() }),
   },
