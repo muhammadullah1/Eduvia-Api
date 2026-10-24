@@ -25,6 +25,10 @@ const bodies = {
     prefix: Joi.string().max(20),
     digits: Joi.number().integer().min(1).max(8),
   }).min(1),
+  [SETTING_KEYS.ATTENDANCE]: Joi.object({
+    editWindowDays: Joi.number().integer().min(0).max(31),
+    lowThreshold: Joi.number().integer().min(1).max(100),
+  }).min(1),
 };
 
 module.exports = {

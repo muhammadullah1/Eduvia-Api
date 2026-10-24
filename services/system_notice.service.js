@@ -9,6 +9,7 @@ const { Op } = require("sequelize");
 const { Exams, MarkSheets, Attendances, Classes, TeacherAbsences, BlockDates } = require("../models");
 const { USER_ROLES } = require("../constants");
 const { today: schoolToday, weekdayOf } = require("../utils/dates");
+const superMasterService = require("./super_master.service");
 
 const MANAGERS = [USER_ROLES.SUPER_ADMIN, USER_ROLES.OPERATIONS_MANAGER];
 const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
@@ -72,14 +73,27 @@ async function pendingSubstitutions({ schoolId, today }) {
   };
 }
 
+async function attendanceReminders({ user, today }) {
+  const rows = (await superMasterService.remindersFor(user, today)).filter((r) => !r.taken);
+  if (!rows.length) return null;
+  return {
+    id: "attendance-reminder",
+    title: "Attendance reminder",
+    detail: `Management is waiting for today's attendance: ${rows.map((r) => r.classLabel).join(", ")}.`,
+    count: rows.length,
+    section: "attendance",
+  };
+}
+
 const CHECKS = [
   { roles: MANAGERS, run: unscheduledPapers },
   { roles: MANAGERS, run: attendanceNotMarked },
   { roles: MANAGERS, run: pendingSubstitutions },
+  { roles: [USER_ROLES.TEACHER], run: attendanceReminders },
 ];
 
 async function list(user, { today = schoolToday(), checks = CHECKS } = {}) {
-  const ctx = { schoolId: user.schoolId, today };
+  const ctx = { schoolId: user.schoolId, today, user };
   const applicable = checks.filter((check) => check.roles.includes(user.role));
   const results = await Promise.all(applicable.map((check) => check.run(ctx)));
   return results.filter(Boolean);

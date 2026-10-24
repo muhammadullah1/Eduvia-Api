@@ -31,6 +31,26 @@ exports.STUDENT_STATUS = {
   WITHDRAWN: "Withdrawn",
 };
 
+/** What a student_status_events row records (SRS 4.3.3). */
+exports.LIFECYCLE_EVENT = {
+  ENROLLED: "Enrolled",
+  DEACTIVATED: "Deactivated",
+  REACTIVATED: "Reactivated",
+  GRADUATED: "Graduated",
+  STRUCK_OFF: "StruckOff",
+  WITHDRAWN: "Withdrawn",
+  READMITTED: "Readmitted",
+};
+
+/** Reason groups. Inactive is temporary; strike-off formally ends enrollment. */
+exports.LIFECYCLE_REASONS = {
+  Inactive: ["Leave", "Medical", "Fee hold", "Other"],
+  StruckOff: ["Transfer out", "Withdrawn by parent", "Long absence", "Disciplinary", "Policy", "Other"],
+};
+
+/** Types in the lifecycle history feed: promotion outcomes plus status events. */
+exports.LIFECYCLE_HISTORY_TYPES = ["Promoted", "Repeated", ...Object.values(exports.LIFECYCLE_EVENT)];
+
 exports.APPLICATION_STATUS = {
   NEW: "New",
   REVIEW: "Review",
@@ -53,6 +73,7 @@ exports.PAYMENT_STATUS = {
 exports.ATTENDANCE_STATUS = {
   PRESENT: "Present",
   ABSENT: "Absent",
+  LATE: "Late",
   LEAVE: "Leave",
 };
 
@@ -135,9 +156,16 @@ exports.SETTING_KEYS = {
   RESULT_VISIBILITY: "resultVisibility",
   FEES: "fees",
   ADMISSION: "admission",
+  ATTENDANCE: "attendance",
 };
 
 exports.SETTING_DEFAULTS = {
+  attendance: {
+    // Saved marks can be changed up to this many days after the attendance date (0 = same day only).
+    editWindowDays: 7,
+    // Students below this attendance % are listed as low attendance.
+    lowThreshold: 75,
+  },
   dailyTestRules: {
     passPercent: 40,
     maxFailsPerMonth: 1,

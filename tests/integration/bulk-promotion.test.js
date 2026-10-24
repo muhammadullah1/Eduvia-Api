@@ -30,8 +30,9 @@ describe("POST /students/promotions/bulk", () => {
       fromClassId: from.id,
       toClassId: to.id,
       sessionId: session.id,
-      date: "2027-03-31",
+      date: "2026-10-20",
       graduationResult: "Passed",
+      graduationOverride: true, // Grade 5 is not the final grade in this session
       students: [
         { studentId: a.id, action: "promote" },
         { studentId: b.id, action: "promote" },
@@ -64,7 +65,7 @@ describe("POST /students/promotions/bulk", () => {
     const to = await makeClass(school.id, session.id);
     const kids = await Promise.all([1, 2].map(() => makeStudent(school.id, from.id)));
     const res = await promote(token, {
-      fromClassId: from.id, toClassId: to.id, sessionId: session.id, date: "2027-03-31",
+      fromClassId: from.id, toClassId: to.id, sessionId: session.id, date: "2026-10-20",
       students: kids.map((kid) => ({ studentId: kid.id, action: "promote" })),
     });
     expect(res.status).toBe(200);
@@ -78,7 +79,7 @@ describe("POST /students/promotions/bulk", () => {
     const to = await makeClass(school.id, next.id, "Grade 4");
     const [up, stay] = await Promise.all([1, 2].map(() => makeStudent(school.id, from.id)));
     const res = await promote(token, {
-      fromClassId: from.id, toClassId: to.id, sessionId: next.id, date: "2027-04-01",
+      fromClassId: from.id, toClassId: to.id, sessionId: next.id, date: "2026-10-20",
       students: [{ studentId: up.id, action: "promote" }, { studentId: stay.id, action: "hold" }],
     });
     expect(res.status).toBe(200);
@@ -94,7 +95,7 @@ describe("POST /students/promotions/bulk", () => {
     const ok = await makeStudent(school.id, from.id);
     const stray = await makeStudent(school.id, other.id);
     const res = await promote(token, {
-      fromClassId: from.id, toClassId: to.id, sessionId: session.id, date: "2027-03-31",
+      fromClassId: from.id, toClassId: to.id, sessionId: session.id, date: "2026-10-20",
       students: [{ studentId: ok.id, action: "promote" }, { studentId: stray.id, action: "promote" }],
     });
     expect(res.status).toBe(409);
@@ -107,7 +108,7 @@ describe("POST /students/promotions/bulk", () => {
     const tiny = await makeClass(school.id, session.id);
     await tiny.update({ capacity: 1 });
     const kids = await Promise.all([1, 2].map(() => makeStudent(school.id, from.id)));
-    const base = { fromClassId: from.id, toClassId: tiny.id, sessionId: session.id, date: "2027-03-31" };
+    const base = { fromClassId: from.id, toClassId: tiny.id, sessionId: session.id, date: "2026-10-20" };
 
     const full = await promote(token, { ...base, students: kids.map((kid) => ({ studentId: kid.id, action: "promote" })) });
     expect(full.status).toBe(409);
@@ -130,7 +131,7 @@ describe("POST /students/promotions/bulk", () => {
   });
 
   test("needs students.manage", async () => {
-    const res = await promote(teacherToken, { fromClassId: 1, sessionId: 1, date: "2027-03-31", students: [{ studentId: 1, action: "promote" }] });
+    const res = await promote(teacherToken, { fromClassId: 1, sessionId: 1, date: "2026-10-20", students: [{ studentId: 1, action: "promote" }] });
     expect(res.status).toBe(403);
   });
 });

@@ -1,6 +1,10 @@
 "use strict";
 
 const { feeService, documentService } = require("../services");
+const feeReportService = require("../services/fee_report.service");
+const { importTemplate } = require("../services/fee_template.service");
+const { render, sendFile } = require("../utils/report_export");
+const { schoolBranding } = require("../utils/branding");
 const { handle } = require("../utils/handler");
 
 module.exports = {
@@ -37,5 +41,24 @@ module.exports = {
   },
   myCollections: handle("My collections", (req) => feeService.myCollections(req.user, req.query)),
   collections: handle("Collections", (req) => feeService.collections(req.user, req.query)),
+  report: async (req, res, next) => {
+    try {
+      const { format, from, to, month, classId } = req.query;
+      const report = await feeReportService.build(req.user, req.params.kind, { from, to, month, classId });
+      if (format === "json") return res.status(200).json({ success: true, message: report.title, data: report });
+      const brand = await schoolBranding(req.user.schoolId, req.user.id);
+      return sendFile(res, await render(report, format, brand), format, report.filename);
+    } catch (err) {
+      return next(err);
+    }
+  },
+  importTemplate: async (req, res, next) => {
+    try {
+      const brand = await schoolBranding(req.user.schoolId, req.user.id);
+      return sendFile(res, await importTemplate(brand), "xlsx", "fee-import-template");
+    } catch (err) {
+      return next(err);
+    }
+  },
   summary: handle("Fee summary", (req) => feeService.summary(req.user, req.query)),
 };

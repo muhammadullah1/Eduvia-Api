@@ -104,12 +104,13 @@ module.exports = {
     ...idParam,
     body: Joi.object({
       classId: id,
-      reason: Joi.string().max(500).allow(""),
+      // D9: every result-visibility override records why (SRS addendum §8, p49).
+      reason: Joi.string().trim().min(3).max(500).required(),
     }),
   },
   validateOverride: {
     ...idParam,
-    body: Joi.object({ studentId: id.required(), reason: Joi.string().max(500).allow("") }),
+    body: Joi.object({ studentId: id.required(), reason: Joi.string().trim().min(3).max(500).required() }),
   },
   validateRevoke: { params: Joi.object({ overrideId: id.required() }) },
   validateOverrideList: { query: Joi.object({ examId: id }) },

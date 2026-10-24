@@ -74,7 +74,7 @@ Only Super Admin changes this setting.
 An authorized user (Super Admin or Operations Manager) may grant one active override per exam and student.
 
 - Store who granted it, when, the student, the exam, and the reason.
-- Reason is required while `requireOverrideReason` is true.
+- A reason (at least 3 characters) is always required. The `requireOverrideReason` setting is kept for compatibility but no longer relaxes this.
 - Revoke stores who revoked it and when. It does not delete the grant row.
 - Grant and revoke are audited.
 - The override never edits marks.

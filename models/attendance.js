@@ -30,12 +30,17 @@ module.exports = (sequelize, DataTypes) => {
         allowNull: false,
       },
       status: {
-        type: DataTypes.ENUM("Present", "Absent", "Leave"),
+        type: DataTypes.ENUM("Present", "Absent", "Late", "Leave"),
         allowNull: false,
       },
       remarks: {
         type: DataTypes.STRING(255),
         allowNull: true,
+      },
+      fkCreatedByUserId: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+        field: "fk_created_by_user_id",
       },
       fkMarkedByUserId: {
         type: DataTypes.INTEGER,

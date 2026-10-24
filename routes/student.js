@@ -12,6 +12,8 @@ const manage = authorize("students.manage");
 router.get("/", authorize("students.read"), c.list);
 router.get("/promotions/history", manage, validate(v.validatePromotionHistory), c.promotionHistory);
 router.post("/promotions/bulk", manage, validate(v.validateBulkPromote), c.bulkPromote);
+router.get("/lifecycle/history", manage, validate(v.validateLifecycleHistory), c.lifecycleHistory);
+router.get("/:id/lifecycle", manage, validate(v.validateId), c.lifecycle);
 router.get("/:id", authorize("students.read"), validate(v.validateId), c.getById);
 router.post("/", manage, validate(v.validateCreate), c.create);
 router.patch("/:id", manage, validate(v.validateId), validate(v.validateUpdate), c.update);
