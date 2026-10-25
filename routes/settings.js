@@ -14,6 +14,20 @@ const router = express.Router();
 
 const writers = [...new Set([...rolesFor("settings.academic.update"), ...rolesFor("settings.fees.update")])];
 
+const KEY_ALIASES = {
+  "daily-tests": "dailyTestRules",
+  "daily-test-rules": "dailyTestRules",
+  "result-visibility": "resultVisibility",
+  "results": "resultVisibility",
+};
+
+function normalizeKey(req, res, next) {
+  if (req.params.key && KEY_ALIASES[req.params.key]) {
+    req.params.key = KEY_ALIASES[req.params.key];
+  }
+  next();
+}
+
 function authorizeSettingWrite(req, res, next) {
   const permission = permissionFor(req.params.key);
   if (permission && !can(req.user.role, permission)) {
@@ -23,6 +37,6 @@ function authorizeSettingWrite(req, res, next) {
 }
 
 router.get("/", authorize("settings.read"), c.getAll);
-router.put("/:key", authorizeRoles(writers), authorizeSettingWrite, validate(v.validateUpdate), c.update);
+router.put("/:key", normalizeKey, authorizeRoles(writers), authorizeSettingWrite, validate(v.validateUpdate), c.update);
 
 module.exports = router;
