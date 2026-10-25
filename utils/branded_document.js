@@ -16,7 +16,7 @@ const WHITE = [1, 1, 1];
 // ---- PDF -----------------------------------------------------------------
 
 /** Letterhead at the top of the current page; leaves `doc.y` below it. */
-function pdfHeader(doc, brand, { title, facts: allFacts = [], factsPerRow = 4 }) {
+function pdfHeader(doc, brand, { title, subtitle, facts: allFacts = [], factsPerRow = 4 }) {
   const facts = allFacts.filter(([label]) => label !== "Note");
   const notes = allFacts.filter(([label]) => label === "Note").map(([, value]) => String(value));
   const c = brand.colors;
@@ -31,6 +31,8 @@ function pdfHeader(doc, brand, { title, facts: allFacts = [], factsPerRow = 4 })
   if (brand.address) doc.text(left, m + 29, brand.address, { size: 8, color: rgb(c.muted), width: nameW });
   if (brand.contact) doc.text(left, m + 40, brand.contact, { size: 8, color: rgb(c.muted), width: nameW });
   doc.text(m + usable - titleW, m + 18, title, { size: 12, bold: true, color: rgb(c.brand), width: titleW, align: "right" });
+  // Optional second line (e.g. the report period) so a long title never has to be cut.
+  if (subtitle) doc.text(m + usable - titleW, m + 31, subtitle, { size: 8.5, bold: true, color: rgb(c.ink), width: titleW, align: "right" });
   doc.line(m, m + logo + 6, m + usable, m + logo + 6, { width: 2, color: rgb(c.brand) });
   doc.y = m + logo + 14;
 

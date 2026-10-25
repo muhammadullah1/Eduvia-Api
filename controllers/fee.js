@@ -3,13 +3,20 @@
 const { feeService, documentService } = require("../services");
 const feeReportService = require("../services/fee_report.service");
 const { importTemplate } = require("../services/fee_template.service");
+const feeImportService = require("../services/fee_import.service");
 const { render, sendFile } = require("../utils/report_export");
 const { schoolBranding } = require("../utils/branding");
 const { handle } = require("../utils/handler");
 
 module.exports = {
   generateMonths: handle("Fee months generated", (req) => feeService.generateMonths(req.user, req.body), 201),
+  previewGeneration: handle("Fee generation preview", (req) => feeService.previewGeneration(req.user, req.body)),
+  studentLedger: handle("Student ledger", (req) => feeService.studentLedger(req.user, req.params.studentId)),
   listMonths: handle("Fee months", (req) => feeService.listMonths(req.user, req.query.studentId)),
+  previewPayment: handle("Payment preview", (req) => feeService.previewPayment(req.user, req.body)),
+  collectOverview: handle("Collect overview", (req) => feeService.collectOverview(req.user)),
+  searchStudents: handle("Students", (req) => feeService.searchStudents(req.user, req.query)),
+  collectContext: handle("Collect context", (req) => feeService.collectContext(req.user, req.params.studentId)),
   listPayments: handle("Payments", (req) => feeService.listPayments(req.user, req.query)),
   recordPayment: async (req, res, next) => {
     try {
@@ -24,7 +31,20 @@ module.exports = {
     }
   },
   confirmPayment: handle("Payment confirmed", (req) => feeService.confirmPayment(req.user, req.params.id)),
-  importPayments: handle("Fee import", (req) => feeService.importPayments(req.user, req.body)),
+  validateImport: handle("Fee import validated", (req) => feeImportService.validateFile(req.user, req.body), 201),
+  commitImport: handle("Fee import committed", (req) => feeImportService.commit(req.user, req.params.id, req.get("Idempotency-Key"))),
+  discardImport: handle("Fee import discarded", (req) => feeImportService.discard(req.user, req.params.id)),
+  importDetail: handle("Fee import", (req) => feeImportService.detail(req.user, req.params.id)),
+  importHistory: handle("Fee import history", (req) => feeImportService.history(req.user, req.query)),
+  importErrorReport: async (req, res, next) => {
+    try {
+      const brand = await schoolBranding(req.user.schoolId, req.user.id);
+      const { buffer, filename } = await feeImportService.errorReport(req.user, req.params.id, brand);
+      return sendFile(res, buffer, "xlsx", filename);
+    } catch (err) {
+      return next(err);
+    }
+  },
   receipt: async (req, res, next) => {
     try {
       if (req.query.format === "pdf") {

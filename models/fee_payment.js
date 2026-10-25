@@ -26,12 +26,12 @@ module.exports = (sequelize, DataTypes) => {
         field: "receipt_no",
       },
       amountPaid: {
-        type: DataTypes.DECIMAL(10, 2),
+        type: DataTypes.DECIMAL(12, 2),
         allowNull: false,
         field: "amount_paid",
       },
       unallocatedAmount: {
-        type: DataTypes.DECIMAL(10, 2),
+        type: DataTypes.DECIMAL(12, 2),
         allowNull: false,
         defaultValue: 0.0,
         field: "unallocated_amount",

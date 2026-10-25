@@ -16,7 +16,7 @@ const { request, requestRaw } = require("../helpers/http");
 
 const TODAY = today();
 const MONTH = TODAY.slice(0, 7);
-const call = (token, method, path, body) => request(app, { method, path: `/api${path}`, token, body });
+const call = (token, method, path, body, headers) => request(app, { method, path: `/api${path}`, token, body, headers });
 const raw = (token, path) => requestRaw(app, { path: `/api${path}`, token });
 const q = (sql, replacements) => sequelize.query(sql, { replacements, type: sequelize.QueryTypes.SELECT });
 const money = (v) => Math.round(Number(v || 0) * 100) / 100;
@@ -24,6 +24,20 @@ const summaryValue = (report, label) => {
   const hit = report.summary.find(([l]) => l === label);
   return hit ? Number(String(hit[1]).replace(/,/g, "")) : undefined;
 };
+
+
+/** Offline sync in two steps (validate, then commit the valid rows), summarised like the summary screen. */
+async function syncFile(token, fileName, contentBase64) {
+  const validated = await call(token, "POST", "/fees/imports/validate", { fileName, contentBase64 });
+  expect(validated.status).toBe(201);
+  let { batch, rows } = validated.body.data;
+  if (batch.validRows > 0) {
+    const committed = await call(token, "POST", `/fees/imports/${batch.id}/commit`, undefined, { "Idempotency-Key": `test-${uid()}-${batch.id}` });
+    expect(committed.status).toBe(200);
+    ({ batch, rows } = committed.body.data);
+  }
+  return { success: batch.importedRows, skipped: batch.skippedRows, failed: batch.failedRows, rows: rows.map((r) => ({ line: r.rowNumber, status: r.status })) };
+}
 
 describe("fee reports", () => {
   let school; let session; let tok; let classA; let classB; let s1; let s2; let s3; let users;
@@ -63,7 +77,7 @@ describe("fee reports", () => {
 
   test("operations manager, teacher and parent are refused every fee report and the template", async () => {
     for (const role of ["ops", "teacher", "parent"]) {
-      for (const kind of ["daily", "monthly", "class-wise", "student-wise", "outstanding", "advance"]) {
+      for (const kind of ["daily", "monthly", "class-wise", "student-wise", "outstanding", "advance", "defaulters"]) {
         expect((await call(tok[role], "GET", `/fees/reports/${kind}`)).status).toBe(403);
       }
       expect((await raw(tok[role], "/fees/import-template")).status).toBe(403);
@@ -86,7 +100,7 @@ describe("fee reports", () => {
     expect(report.rows).toHaveLength(1);
     expect(report.rows[0]).toMatchObject({ admissionNo: s1.admissionNo, amount: 1000, method: "Cash" });
     expect(report.columns.map((c) => c.key)).not.toContain("recordedBy");
-    for (const kind of ["monthly", "class-wise", "student-wise", "outstanding", "advance"]) {
+    for (const kind of ["monthly", "class-wise", "student-wise", "outstanding", "advance", "defaulters"]) {
       expect((await call(tok.acc, "GET", `/fees/reports/${kind}`)).status).toBe(403);
     }
     // Same rule in the files: no summary sheet / totals.
@@ -130,21 +144,26 @@ describe("fee reports", () => {
     expect(summaryValue(classWise, "Outstanding to date (PKR)")).toBe(money(ledger.outstanding));
     expect(summaryValue(classWise, "Billed for the month (PKR)")).toBe(money(ledger.billed));
     const rowA = classWise.rows.find((r) => r.className === "Rpt A");
-    expect(rowA.students).toBe(2);
+    expect(rowA.enrolled).toBe(2);
 
     const outstanding = (await call(tok.admin, "GET", `/fees/reports/outstanding?month=${MONTH}`)).body.data;
     expect(summaryValue(outstanding, "Total outstanding (PKR)")).toBe(money(ledger.outstanding));
     expect(outstanding.rows.map((r) => r.admissionNo)).not.toContain(s3.admissionNo); // fully paid
 
     const advance = (await call(tok.admin, "GET", `/fees/reports/advance?month=${MONTH}`)).body.data;
-    const [credit] = await q("SELECT COALESCE(SUM(unallocated_amount),0) AS c FROM fee_payments WHERE fk_school_id = :s AND status = 'Paid'", { s: school.id });
+    const [credit] = await q(
+      `SELECT COALESCE(SUM(CASE WHEN l.entry_type = 'Credit' THEN l.amount ELSE -l.amount END),0) AS c
+         FROM student_credit_ledger l JOIN students s ON s.id = l.fk_student_id WHERE s.fk_school_id = :s`,
+      { s: school.id },
+    );
     expect(advance.rows.map((r) => r.admissionNo)).toEqual([s3.admissionNo]);
-    expect(summaryValue(advance, "Total advance (PKR)")).toBe(money(money(ledger.prepaid) + money(credit.c)));
-    expect(summaryValue(advance, "Total advance (PKR)")).toBe(1500);
+    expect(summaryValue(advance, "Credit balance (PKR)")).toBe(money(credit.c));
+    expect(summaryValue(advance, "Credit balance (PKR)")).toBe(1500);
+    expect(summaryValue(advance, "Paid ahead for later months (PKR)")).toBe(money(ledger.prepaid));
 
     const studentWise = (await call(tok.admin, "GET", `/fees/reports/student-wise?month=${MONTH}&classId=${classB.id}`)).body.data;
     expect(studentWise.rows).toHaveLength(1);
-    expect(studentWise.rows[0]).toMatchObject({ admissionNo: s3.admissionNo, outstanding: 0, advance: 1500 });
+    expect(studentWise.rows[0]).toMatchObject({ admissionNo: s3.admissionNo, outstanding: 0, credit: 1500 });
   });
 
   test("downloads are real CSV, XLSX and PDF files with the same rows", async () => {
@@ -169,6 +188,24 @@ describe("fee reports", () => {
     expect(body.startsWith("%PDF-1.4")).toBe(true);
     expect(body.trimEnd().endsWith("%%EOF")).toBe(true);
     expect(body).toContain("(Rpt A)");
+  });
+
+  test("pdf table headers are never cut off (Paid students wraps instead of Paid stude...)", async () => {
+    const src = require("fs").readFileSync(require("path").join(__dirname, "../../services/fee_report.service.js"), "utf8");
+    const labels = [...src.matchAll(/label: "([^"]+)"/g)].map((m) => m[1]);
+    expect(labels).toContain("Paid students");
+    const kinds = ["daily", "monthly", "class-wise", "student-wise", "outstanding", "advance", "defaulters"];
+    for (const kind of kinds) {
+      const res = await raw(tok.admin, `/fees/reports/${kind}?month=${MONTH}&from=${TODAY}&format=pdf`);
+      expect([kind, res.status]).toEqual([kind, 200]);
+      const body = res.body.toString("latin1");
+      // a header cell is cut if any truncated text is the start of a column label
+      const cut = (body.match(/\(([^()]*)\.\.\.\) Tj/g) || []).map((m) => m.slice(1, -9)).filter((t) => labels.some((l) => l.startsWith(t) || l.split(" ").some((w, i, ws) => ws.slice(i).join(" ").startsWith(t) && t.length > 2 && ws.slice(i).join(" ") !== t)));
+      expect([kind, cut]).toEqual([kind, []]);
+    }
+    const classWise = (await raw(tok.admin, `/fees/reports/class-wise?month=${MONTH}&format=pdf`)).body.toString("latin1");
+    expect(classWise).toMatch(/\(Paid( students)?\) Tj/);
+    expect(classWise).toMatch(/\((Paid )?students\) Tj/);
   });
 
   test("every format carries the school letterhead (crest, colours, name, filters, generated by/at)", async () => {
@@ -229,7 +266,7 @@ describe("fee reports", () => {
     expect(rows[0][0]).toBe(school.name);
     const headerIndex = rows.findIndex((r) => r[0] === "Admission Number");
     expect(headerIndex).toBeGreaterThan(0);
-    expect(rows[headerIndex]).toEqual(["Admission Number", "Month", "Amount", "Payment Date", "Receipt/Reference", "Payment Method", "Notes"]);
+    expect(rows[headerIndex]).toEqual(["Admission Number", "Student Name", "Class", "Month(s)", "Amount", "Payment Date", "Receipt/Reference No.", "Payment Method", "Notes"]);
     expect(rows.slice(headerIndex + 1).filter((r) => r.length)).toHaveLength(0);
     expect(JSON.stringify(XLSX.utils.sheet_to_json(book.Sheets.Instructions, { header: 1 }))).toContain("EXAMPLE ONLY");
     const styled = new ExcelJS.Workbook();
@@ -237,19 +274,18 @@ describe("fee reports", () => {
     expect(styled.getWorksheet("Payments").getImages()).toHaveLength(1);
 
     // An empty template imports nothing.
-    const empty = await call(tok.acc, "POST", "/fees/payments/import", { filename: "empty.xlsx", contentBase64: res.body.toString("base64") });
-    expect(empty.body.data).toMatchObject({ success: 0, failed: 0, skipped: 0 });
+    const empty = await syncFile(tok.acc, "empty.xlsx", res.body.toString("base64"));
+    expect(empty).toMatchObject({ success: 0, failed: 0, skipped: 0 });
 
     // Fill the template exactly as a user would (first row under the header) and upload it.
     const ref = `T-${uid()}`;
-    XLSX.utils.sheet_add_aoa(book.Sheets.Payments, [[s2.admissionNo, MONTH, 250, TODAY, ref, "Bank Transfer", "template test"]], { origin: `A${headerIndex + 2}` });
+    XLSX.utils.sheet_add_aoa(book.Sheets.Payments, [[s2.admissionNo, "", "", MONTH, 250, TODAY, ref, "Bank Transfer", "template test"]], { origin: `A${headerIndex + 2}` });
     const contentBase64 = XLSX.write(book, { type: "base64", bookType: "xlsx" });
-    const imported = await call(tok.acc, "POST", "/fees/payments/import", { filename: "filled.xlsx", contentBase64 });
-    expect(imported.status).toBe(200);
-    expect(imported.body.data).toMatchObject({ success: 1, failed: 0, skipped: 0 });
-    expect(imported.body.data.rows[0].line).toBe(headerIndex + 2);
-    const again = await call(tok.acc, "POST", "/fees/payments/import", { filename: "filled.xlsx", contentBase64 });
-    expect(again.body.data).toMatchObject({ success: 0, skipped: 1 });
+    const imported = await syncFile(tok.acc, "filled.xlsx", contentBase64);
+    expect(imported).toMatchObject({ success: 1, failed: 0, skipped: 0 });
+    expect(imported.rows[0].line).toBe(headerIndex + 2);
+    const again = await syncFile(tok.acc, "filled.xlsx", contentBase64);
+    expect(again).toMatchObject({ success: 0, skipped: 1 });
   });
 
   test("a plain workbook with the header in row 1 still imports (unchanged behaviour)", async () => {
@@ -265,7 +301,7 @@ describe("fee reports", () => {
       "Sheet1",
     );
     const contentBase64 = XLSX.write(plain, { type: "base64", bookType: "xlsx" });
-    const result = (await call(tok.acc, "POST", "/fees/payments/import", { filename: "plain.xlsx", contentBase64 })).body.data;
+    const result = await syncFile(tok.acc, "plain.xlsx", contentBase64);
     expect(result).toMatchObject({ success: 1, failed: 1 });
     expect(result.rows.map((r) => r.line)).toEqual([2, 3]);
   });

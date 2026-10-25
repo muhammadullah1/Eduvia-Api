@@ -20,7 +20,7 @@ const PERMISSIONS = {
   "settings.read": [SA, OPS],
   "settings.academic.update": [SA, OPS],
   "settings.fees.update": [SA],
-  "audit.read": [SA],
+  "audit.read": [SA, OPS], // Ops: read-only; fee entries are filtered out for roles without fees.amounts.read
 
   "users.read": [SA, OPS],
   "users.create": [SA, OPS],
@@ -80,13 +80,28 @@ const PERMISSIONS = {
   "fees.payments.confirm": [SA],
   "fees.collections.mine": [ACC],
   "fees.totals": [SA],
+  // Fee amounts embedded in non-fee responses (class fee, strike-off dues, audit
+  // entries). Everyone else gets them stripped by middlewares/redact_fee_fields.
+  "fees.amounts.read": [SA, ACC, PAR],
   // Fee reports: Super Admin gets every report with totals; the accountant only their own
   // daily collections without totals (enforced again in fee_report.service).
   "fees.reports": [SA, ACC],
 
+  // Finance (Step 8): the accountant records expenses and lists only their own entries,
+  // without totals (enforced again in expense.service). Income and reports: Super Admin.
   "expenses.read": [SA, ACC],
   "expenses.create": [SA, ACC],
   "expenses.manage": [SA],
+  "finance.reports": [SA],
+
+  // Finance Step 2 scaffolding (routes come in later steps). Ops and Teachers get none.
+  "fees.structure.read": [SA, ACC], // accountant: read-only fee structure
+  "fees.structure.update": [SA],
+  "fees.credit.read": [SA, ACC, PAR],
+  "fees.import": [SA, ACC], // offline sync (Excel import) + its upload history
+  "income.read": [SA],
+  "income.create": [SA],
+  "income.manage": [SA],
 
   "updates.read": [SA, OPS, ACC, TCH, PAR],
   "updates.write": [SA, OPS, TCH],

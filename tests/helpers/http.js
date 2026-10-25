@@ -6,7 +6,7 @@ const http = require("http");
  * Sends one request to the Express app on an ephemeral port and returns
  * `{ status, body, headers }`. `cookie` is sent as the Cookie header.
  */
-function request(app, { method = "GET", path, token, body, cookie }) {
+function request(app, { method = "GET", path, token, body, cookie, headers: extra = {} }) {
   return new Promise((resolve, reject) => {
     const server = app.listen(0, () => {
       const payload = body ? JSON.stringify(body) : null;
@@ -19,6 +19,7 @@ function request(app, { method = "GET", path, token, body, cookie }) {
             "Content-Type": "application/json",
             ...(token ? { Authorization: `Bearer ${token}` } : {}),
             ...(cookie ? { Cookie: cookie } : {}),
+            ...extra,
             ...(payload ? { "Content-Length": Buffer.byteLength(payload) } : {}),
           },
         },

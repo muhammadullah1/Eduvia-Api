@@ -1,6 +1,16 @@
 "use strict";
 
 const { classService } = require("../services");
+const { can } = require("../constants/permissions");
+
+/** The class fee is set only by roles that manage fee settings; Ops edits the rest of the class. */
+function withoutFeeUnlessAllowed(req) {
+  if (can(req.user.role, "settings.fees.update")) return req.body;
+  const body = { ...req.body };
+  delete body.monthlyFee;
+  delete body.monthlyTuitionFee;
+  return body;
+}
 
 module.exports = {
   list: async (req, res, next) => {
@@ -21,7 +31,7 @@ module.exports = {
   },
   create: async (req, res, next) => {
     try {
-      const data = await classService.create(req.user.schoolId, req.body);
+      const data = await classService.create(req.user.schoolId, withoutFeeUnlessAllowed(req));
       res.status(201).json({ success: true, message: "Class created", data });
     } catch (err) {
       next(err);
@@ -29,7 +39,7 @@ module.exports = {
   },
   update: async (req, res, next) => {
     try {
-      const data = await classService.update(req.params.id, req.user.schoolId, req.body);
+      const data = await classService.update(req.params.id, req.user.schoolId, withoutFeeUnlessAllowed(req));
       res.status(200).json({ success: true, message: "Class updated", data });
     } catch (err) {
       next(err);

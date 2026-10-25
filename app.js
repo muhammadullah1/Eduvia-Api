@@ -4,6 +4,7 @@ const bodyParser = require("body-parser");
 const helmet = require("helmet");
 const cookieParser = require("cookie-parser");
 const router = require("./routes");
+const { redactFeeFields } = require("./middlewares/redact_fee_fields");
 const ApiError = require("./utils/ApiError");
 const { UniqueConstraintError, ValidationError } = require("sequelize");
 const { isDbConnectivityError } = require("./utils/errors");
@@ -37,7 +38,7 @@ app.use(
     },
     credentials: true,
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization", "platform", "version"],
+    allowedHeaders: ["Content-Type", "Authorization", "platform", "version", "Idempotency-Key"],
   }),
 );
 app.use(helmet());
@@ -46,7 +47,7 @@ app.get("/health", (req, res) => {
   res.status(200).json({ ok: true, timestamp: new Date().toISOString() });
 });
 
-app.use("/api", router);
+app.use("/api", redactFeeFields, router);
 
 app.use((req, res) => {
   if (req.log)

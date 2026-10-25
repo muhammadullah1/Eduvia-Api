@@ -1,33 +1,34 @@
 "use strict";
 
 const Joi = require("joi");
-const { id, idParam, isoDay } = require("./common");
+const { id, idParam, calendarDay, calendarMonth } = require("./common");
+const { PAYMENT_METHODS, EXPENSE_CATEGORIES } = require("../constants/finance");
+
+const fields = {
+  category: Joi.string().valid(...EXPENSE_CATEGORIES).messages({ "any.only": "Choose a category" }),
+  amount: Joi.number().positive().max(9999999999.99).precision(2).messages({ "number.positive": "Amount must be more than 0" }),
+  date: calendarDay,
+  description: Joi.string().trim().min(2).max(255),
+  referenceNo: Joi.string().trim().max(100).allow("", null),
+  paymentMethod: Joi.string().valid(...PAYMENT_METHODS).allow("", null),
+  notes: Joi.string().max(2000).allow("", null),
+};
 
 module.exports = {
   validateId: idParam,
-  validateList: {
-    query: Joi.object({
-      category: Joi.string().max(64),
-      date: isoDay,
-      limit: Joi.number().integer().min(1).max(200),
-      offset: Joi.number().integer().min(0),
-    }),
-  },
+  validateList: { query: Joi.object({ month: calendarMonth }) },
   validateCreate: {
     body: Joi.object({
-      title: Joi.string().min(1).max(255).required(),
-      category: Joi.string().max(64).allow("", null),
-      amount: Joi.number().positive().precision(2).required(),
-      date: isoDay.required(),
+      ...fields,
+      category: fields.category.required(),
+      amount: fields.amount.required(),
+      date: fields.date.required(),
+      description: fields.description.required(),
     }),
   },
-  validateUpdate: {
+  validateUpdate: { params: Joi.object({ id: id.required() }), body: Joi.object(fields).min(1) },
+  validateRemove: {
     params: Joi.object({ id: id.required() }),
-    body: Joi.object({
-      title: Joi.string().min(1).max(255),
-      category: Joi.string().max(64).allow("", null),
-      amount: Joi.number().positive().precision(2),
-      date: isoDay,
-    }).min(1),
+    body: Joi.object({ reason: Joi.string().trim().min(3).max(500).required() }),
   },
 };

@@ -21,7 +21,7 @@ module.exports = (sequelize, DataTypes) => {
         field: "fk_fee_month_id",
       },
       allocatedAmount: {
-        type: DataTypes.DECIMAL(10, 2),
+        type: DataTypes.DECIMAL(12, 2),
         allowNull: false,
         field: "allocated_amount",
       },

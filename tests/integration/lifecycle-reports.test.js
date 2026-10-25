@@ -328,7 +328,7 @@ describe("lifecycle, leave, reports, and documents", () => {
     });
     const sheet = XLSX.utils.aoa_to_sheet([
       ["admission number", "student name", "class", "month", "amount", "payment date", "receipt/reference", "method", "notes"],
-      [fx.student.admissionNo, "Wrong Name", "Class 9", "2026-04", 400, "2026-10-09", `REF-${fx.stamp}`, "Cash", "counter"],
+      [fx.student.admissionNo, "Wrong Name", "", "2026-04", 400, "2026-10-09", `REF-${fx.stamp}`, "Cash", "counter"],
       [inactive.admissionNo, "Old Student", "Class 5-A", "2026-04", 100, "2026-10-09", `BAD-${fx.stamp}`, "Cash", ""],
       ["NOBODY", "Nobody", "Class 5-A", "2026-04", 100, "2026-10-09", `MISS-${fx.stamp}`, "Cash", ""],
       [fx.student.admissionNo, "Ayaan", "Class 5-A", "", "", "", "", "Cash", ""],
@@ -336,12 +336,13 @@ describe("lifecycle, leave, reports, and documents", () => {
     const book = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(book, sheet, "Fees");
     const contentBase64 = XLSX.write(book, { type: "base64", bookType: "xlsx" });
-    const first = await feeService.importPayments(fx.actor, { filename: "fees.xlsx", contentBase64 });
-    expect(first.success).toBe(1);
-    expect(first.failed).toBe(3);
-    const second = await feeService.importPayments(fx.actor, { filename: "fees.xlsx", contentBase64 });
-    expect(second.skipped).toBe(1);
-    expect(second.success).toBe(0);
+    const sync = require("../../services/fee_import.service");
+    const checked = await sync.validateFile(fx.actor, { fileName: "fees.xlsx", contentBase64 });
+    expect(checked.batch).toMatchObject({ validRows: 1, failedRows: 3 });
+    const first = await sync.commit(fx.actor, checked.batch.id, `lifecycle-${fx.stamp}`);
+    expect(first.batch).toMatchObject({ importedRows: 1, failedRows: 3 });
+    const second = await sync.validateFile(fx.actor, { fileName: "fees.xlsx", contentBase64 });
+    expect(second.batch).toMatchObject({ validRows: 0, skippedRows: 1 });
     const month = await StudentFeeMonths.findOne({ where: { fkStudentId: fx.student.id, month: "2026-04" } });
     expect(Number(month.paidAmount)).toBe(400);
     expect(month.status).toBe("Partially Paid");

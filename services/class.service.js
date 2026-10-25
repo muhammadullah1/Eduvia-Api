@@ -3,6 +3,8 @@
 const { Op } = require("sequelize");
 const { Classes, Students, TimetableSlots } = require("../models");
 const ApiError = require("../utils/ApiError");
+// Lazy: fee_structure.service -> audit.service would otherwise load during this module's init.
+const feeStructureService = () => require("./fee_structure.service");
 const { sortClasses } = require("../utils/class_order");
 
 function isArchivedClass(row) {
@@ -147,7 +149,10 @@ async function create(schoolId, data) {
     );
   }
   // A new class has no students yet, so it starts Inactive.
-  return Classes.create({ ...data, fkSchoolId: schoolId, status: "Inactive" });
+  const row = await Classes.create({ ...data, fkSchoolId: schoolId, status: "Inactive" });
+  // The class form's fee becomes the class's first Tuition row (fee structure is the source of truth).
+  if (Number(row.monthlyTuitionFee) > 0) await feeStructureService().recordClassFee(row, { isNew: true });
+  return row;
 }
 
 async function update(id, schoolId, data) {
@@ -163,7 +168,9 @@ async function update(id, schoolId, data) {
   // Status follows enrolment (syncClassStatus); it is never set by hand.
   const changes = { ...data };
   delete changes.status;
+  const feeBefore = Number(row.monthlyTuitionFee);
   await row.update(changes);
+  if (Number(row.monthlyTuitionFee) !== feeBefore) await feeStructureService().recordClassFee(row);
   return row;
 }
 
