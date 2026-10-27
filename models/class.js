@@ -53,7 +53,7 @@ module.exports = (sequelize, DataTypes) => {
         field: "period_start_times",
       },
       monthlyTuitionFee: {
-        type: DataTypes.DECIMAL(10, 2),
+        type: DataTypes.DECIMAL(12, 2),
         allowNull: false,
         defaultValue: 0.0,
         field: "monthly_tuition_fee",

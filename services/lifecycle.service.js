@@ -1,5 +1,7 @@
 "use strict";
 
+const { seesFeeAmounts } = require("../middlewares/redact_fee_fields");
+
 /**
  * Student lifecycle (SRS 4.3.3, p15–16): activation/deactivation, graduation,
  * strike-off, and readmission. Every change is one append-only
@@ -307,12 +309,19 @@ async function history(schoolId, filters = {}) {
       finalResult: row.final_result,
       academicStatus: row.academic_status,
       outstandingAmount: row.outstanding_amount == null ? null : Number(row.outstanding_amount),
+      hasOutstanding: row.outstanding_amount == null ? null : Number(row.outstanding_amount) > 0,
       transferToSchool: row.transfer_to_school,
       graduationOverride: Boolean(row.graduation_override),
       recordedBy: row.actor_name,
     })),
     pagination: { total, page, pageSize: size, totalPages: Math.ceil(total / size) },
   };
+}
+
+/** Dues as a yes/no for roles without fee access (Ops); the amount only for fee roles. */
+async function outstandingView(actor, studentId) {
+  const amount = await outstandingOf(studentId);
+  return { outstanding: seesFeeAmounts(actor.role) ? amount : null, hasOutstanding: amount > 0 };
 }
 
 /** A student's full lifecycle, oldest first, with what they can change to next. */
@@ -326,7 +335,7 @@ async function timeline(actor, studentId) {
     status: student.status,
     admittedOn: student.getDataValue("admissionDate") || null,
     finalGrade: klass ? await isFinalGrade(klass) : false,
-    outstanding: await outstandingOf(student.id),
+    ...(await outstandingView(actor, student.id)),
     allowed: allowedTransitions(student.status),
     reasons: LIFECYCLE_REASONS,
     events: events.reverse(),

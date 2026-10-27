@@ -1,6 +1,8 @@
 "use strict";
 
+const { Op } = require("sequelize");
 const { AuditLogs, sequelize } = require("../models");
+const { can } = require("../constants/permissions");
 
 async function log(schoolId, { actorUserId, actorLabel, action, entityType, entityId, metadata }, options = {}) {
   return AuditLogs.create(
@@ -33,9 +35,15 @@ async function record(actor, action, { entityType, entityId, metadata } = {}, op
   );
 }
 
-async function list(schoolId, { limit = 50, entityType, entityId } = {}) {
+/** Audit entries about money; hidden from roles without fee access (Ops reads the rest). */
+const FEE_ENTITY_TYPES = ["fee_payment", "student_fee_month", "expense", "fee_structure", "other_income", "fee_import", "student_credit", "finance_report"];
+
+async function list(schoolId, { limit = 50, entityType, entityId } = {}, viewer = null) {
   const where = { fkSchoolId: schoolId };
+  const feeBlind = viewer && !can(viewer.role, "fees.amounts.read");
+  if (feeBlind && FEE_ENTITY_TYPES.includes(entityType)) return [];
   if (entityType) where.entityType = entityType;
+  else if (feeBlind) where[Op.or] = [{ entityType: null }, { entityType: { [Op.notIn]: FEE_ENTITY_TYPES } }];
   if (entityId) where.entityId = entityId;
   return AuditLogs.findAll({
     where,
@@ -44,4 +52,4 @@ async function list(schoolId, { limit = 50, entityType, entityId } = {}) {
   });
 }
 
-module.exports = { log, record, list };
+module.exports = { log, record, list, FEE_ENTITY_TYPES };

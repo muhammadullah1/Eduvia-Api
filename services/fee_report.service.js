@@ -11,7 +11,8 @@
  * - Everyone else is refused by the route (`fees.reports`).
  *
  * All figures come from the ledger (`student_fee_months`) and confirmed
- * (`Paid`) receipts. Students are grouped by their current class.
+ * (`Paid`) receipts, plus the student credit ledger for advance money. Students
+ * are grouped by their current class; defaulters have overdue unpaid months.
  */
 const { QueryTypes } = require("sequelize");
 const { sequelize, Classes } = require("../models");
@@ -20,7 +21,7 @@ const ApiError = require("../utils/ApiError");
 const { today, addMonths, firstOfMonth } = require("../utils/dates");
 const { money } = require("../utils/report_export");
 
-const REPORT_KINDS = ["daily", "monthly", "class-wise", "student-wise", "outstanding", "advance"];
+const REPORT_KINDS = ["daily", "monthly", "class-wise", "student-wise", "outstanding", "advance", "defaulters"];
 const ACCOUNTANT_KINDS = new Set(["daily"]);
 const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const monthLabel = (m) => `${MONTH_NAMES[Number(String(m).slice(5, 7)) - 1]} ${String(m).slice(0, 4)}`;
@@ -183,45 +184,70 @@ async function monthly(actor, { month, classId }) {
 }
 
 // ---- ledger positions ------------------------------------------------------
+//
+// Counting rules (Step 6):
+// - A student has one bill row per fee type per month (Tuition, Annual, Admission, ...).
+//   Every "student" or "month" count below is taken over bills first grouped per
+//   (student, month), so extra fee types never inflate a count.
+// - Advance money is the live credit-ledger balance (`student_credit_ledger`), not
+//   `fee_payments.unallocated_amount` (history only).
 
-/** Status of one ledger month as of `asOf` (YYYY-MM), mirroring utils/fee_allocation. */
-const LEDGER_STATUS_SQL = (asOf) => `CASE
-  WHEN m.paid_amount <= 0 THEN 'Unpaid'
-  WHEN m.paid_amount < m.net_amount THEN 'Partial'
-  WHEN m.month > ${asOf} THEN 'Advance'
-  ELSE 'Paid' END`;
+/** One row per (student, month): bill rows of every fee type summed. */
+const STUDENT_MONTHS_CTE = `student_months AS (
+  SELECT m.fk_student_id AS sid, m.month,
+         SUM(m.net_amount) AS net,
+         SUM(m.paid_amount) AS paid,
+         SUM(GREATEST(m.net_amount - m.paid_amount, 0)) AS open,
+         COALESCE(MIN(m.due_date), (to_date(m.month || '-01', 'YYYY-MM-DD') + INTERVAL '1 month' - INTERVAL '1 day')::date) AS due_date
+    FROM student_fee_months m
+   WHERE m.fk_school_id = :schoolId AND m.archived_at IS NULL
+   GROUP BY m.fk_student_id, m.month)`;
+
+const CREDIT_BALANCE_SQL = `(SELECT COALESCE(SUM(CASE WHEN l.entry_type = 'Credit' THEN l.amount ELSE -l.amount END), 0)
+     FROM student_credit_ledger l WHERE l.fk_student_id = s.id)`;
+
+const percent = (part, whole) => (n(whole) > 0 ? Math.round((n(part) / n(whole)) * 1000) / 10 : null);
 
 async function classWise(actor, { month, classId }) {
   const target = month || today().slice(0, 7);
   const raw = await query(
-    `SELECT c.id, c.label,
-            COUNT(DISTINCT s.id) FILTER (WHERE s.status IN ('Active', 'Pending'))::int AS students,
-            COALESCE(SUM(m.net_amount) FILTER (WHERE m.month = :month), 0) AS billed,
-            COALESCE(SUM(m.paid_amount) FILTER (WHERE m.month = :month), 0) AS collected,
-            COALESCE(SUM(GREATEST(m.net_amount - m.paid_amount, 0)) FILTER (WHERE m.month <= :month), 0) AS outstanding,
-            COUNT(*) FILTER (WHERE m.month = :month AND ${LEDGER_STATUS_SQL(":month")} IN ('Paid', 'Advance'))::int AS paid_count,
-            COUNT(*) FILTER (WHERE m.month = :month AND ${LEDGER_STATUS_SQL(":month")} = 'Partial')::int AS partial_count,
-            COUNT(*) FILTER (WHERE m.month = :month AND ${LEDGER_STATUS_SQL(":month")} = 'Unpaid')::int AS unpaid_count
+    `WITH ${STUDENT_MONTHS_CTE},
+          this_month AS (SELECT sid, net, paid FROM student_months WHERE month = :month),
+          up_to AS (SELECT sid, SUM(open) AS open FROM student_months WHERE month <= :month GROUP BY sid)
+     SELECT c.id, c.label,
+            COUNT(s.id) FILTER (WHERE s.status IN ('Active', 'Pending'))::int AS enrolled,
+            COUNT(tm.sid)::int AS billed_students,
+            COUNT(tm.sid) FILTER (WHERE tm.paid >= tm.net)::int AS paid_students,
+            COUNT(tm.sid) FILTER (WHERE tm.paid > 0 AND tm.paid < tm.net)::int AS partial_students,
+            COUNT(tm.sid) FILTER (WHERE tm.paid <= 0 AND tm.net > 0)::int AS unpaid_students,
+            COALESCE(SUM(tm.net), 0) AS billed,
+            COALESCE(SUM(tm.paid), 0) AS collected,
+            COALESCE(SUM(td.open), 0) AS outstanding
        FROM classes c
        LEFT JOIN students s ON s.fk_class_id = c.id AND s.archived_at IS NULL
-       LEFT JOIN student_fee_months m ON m.fk_student_id = s.id AND m.archived_at IS NULL
+       LEFT JOIN this_month tm ON tm.sid = s.id
+       LEFT JOIN up_to td ON td.sid = s.id
       WHERE c.fk_school_id = :schoolId AND c.archived_at IS NULL
         ${classId ? "AND c.id = :classId" : ""}
       GROUP BY c.id, c.label
-      ORDER BY c.id`,
+      ORDER BY c.label, c.id`,
     { schoolId: actor.schoolId, month: target, classId: classId || null },
   );
   const rows = raw.map((r) => ({
     className: r.label,
-    students: r.students,
+    enrolled: r.enrolled,
+    billedStudents: r.billed_students,
+    paidStudents: r.paid_students,
+    partialStudents: r.partial_students,
+    unpaidStudents: r.unpaid_students,
     billed: n(r.billed),
     collected: n(r.collected),
-    balance: n(n(r.billed) - n(r.collected)),
-    paid: r.paid_count,
-    partial: r.partial_count,
-    unpaid: r.unpaid_count,
     outstanding: n(r.outstanding),
+    collectionRate: percent(r.collected, r.billed),
   }));
+  const billed = sum(rows, "billed");
+  const collected = sum(rows, "collected");
+  const rate = percent(collected, billed);
   return {
     kind: "class-wise",
     title: "Class-wise fee report",
@@ -230,25 +256,28 @@ async function classWise(actor, { month, classId }) {
     meta: [
       ["Month", monthLabel(target)],
       ["Class", await classLabel(actor, classId)],
-      ["Note", "Billed/collected are for the month; outstanding includes every month up to it."],
+      ["Note", "Counts are students, not bills. Paid students = every fee for the month fully paid. Billed, collected and collection % are for the month; outstanding includes every month up to it."],
     ],
     columns: [
-      { key: "className", label: "Class", width: 0.15 },
-      { key: "students", label: "Students", type: "number", width: 0.08 },
-      { key: "billed", label: "Billed", type: "money", width: 0.12 },
-      { key: "collected", label: "Collected", type: "money", width: 0.12 },
-      { key: "balance", label: "Month balance", type: "money", width: 0.12 },
-      { key: "paid", label: "Paid", type: "number", width: 0.07 },
-      { key: "partial", label: "Partial", type: "number", width: 0.07 },
-      { key: "unpaid", label: "Unpaid", type: "number", width: 0.07 },
-      { key: "outstanding", label: "Outstanding to date", type: "money", width: 0.2 },
+      { key: "className", label: "Class", width: 0.14 },
+      { key: "enrolled", label: "Enrolled", type: "number", width: 0.08 },
+      { key: "billedStudents", label: "Billed students", type: "number", width: 0.09 },
+      { key: "paidStudents", label: "Paid students", type: "number", width: 0.08 },
+      { key: "partialStudents", label: "Partial", type: "number", width: 0.07 },
+      { key: "unpaidStudents", label: "Unpaid", type: "number", width: 0.07 },
+      { key: "billed", label: "Billed (PKR)", type: "money", width: 0.12 },
+      { key: "collected", label: "Collected (PKR)", type: "money", width: 0.12 },
+      { key: "outstanding", label: "Outstanding (PKR)", type: "money", width: 0.13 },
+      { key: "collectionRate", label: "Collection %", type: "percent", width: 0.1 },
     ],
     rows,
     summary: [
-      ["Students", rows.reduce((s, r) => s + r.students, 0)],
-      ["Billed for the month (PKR)", money(sum(rows, "billed"))],
-      ["Collected against the month (PKR)", money(sum(rows, "collected"))],
+      ["Enrolled students", rows.reduce((s, r) => s + r.enrolled, 0)],
+      ["Paid students", rows.reduce((s, r) => s + r.paidStudents, 0)],
+      ["Billed for the month (PKR)", money(billed)],
+      ["Collected against the month (PKR)", money(collected)],
       ["Outstanding to date (PKR)", money(sum(rows, "outstanding"))],
+      ["Collection %", rate == null ? "—" : `${rate}%`],
     ],
   };
 }
@@ -256,46 +285,51 @@ async function classWise(actor, { month, classId }) {
 async function studentLedger(actor, { month, classId }) {
   const target = month || today().slice(0, 7);
   return query(
-    `SELECT s.id, s.admission_no, s.first_name, s.last_name, s.status, c.label AS class_label,
-            COUNT(m.id) FILTER (WHERE m.month <= :month)::int AS months_billed,
-            COALESCE(SUM(m.net_amount) FILTER (WHERE m.month <= :month), 0) AS due,
-            COALESCE(SUM(m.paid_amount) FILTER (WHERE m.month <= :month), 0) AS paid,
-            COALESCE(SUM(GREATEST(m.net_amount - m.paid_amount, 0)) FILTER (WHERE m.month <= :month), 0) AS outstanding,
-            STRING_AGG(m.month, ',' ORDER BY m.month) FILTER (WHERE m.month <= :month AND m.paid_amount < m.net_amount) AS open_months,
-            COALESCE(SUM(m.paid_amount) FILTER (WHERE m.month > :month AND m.paid_amount > 0), 0) AS advance_paid,
-            STRING_AGG(m.month, ',' ORDER BY m.month) FILTER (WHERE m.month > :month AND m.paid_amount > 0) AS advance_months,
-            (SELECT COALESCE(SUM(p.unallocated_amount), 0) FROM fee_payments p
-              WHERE p.fk_student_id = s.id AND p.archived_at IS NULL AND p.status = 'Paid') AS credit,
+    `WITH ${STUDENT_MONTHS_CTE}
+     SELECT s.id, s.admission_no, s.first_name, s.last_name, s.status, c.label AS class_label,
+            COUNT(b.month) FILTER (WHERE b.month <= :month)::int AS months_billed,
+            COALESCE(SUM(b.net) FILTER (WHERE b.month <= :month), 0) AS due,
+            COALESCE(SUM(b.paid) FILTER (WHERE b.month <= :month), 0) AS paid,
+            COALESCE(SUM(b.open) FILTER (WHERE b.month <= :month), 0) AS outstanding,
+            STRING_AGG(b.month, ',' ORDER BY b.month) FILTER (WHERE b.month <= :month AND b.open > 0) AS open_months,
+            STRING_AGG(b.month, ',' ORDER BY b.month) FILTER (WHERE b.month <= :month AND b.open > 0 AND b.due_date < :today) AS overdue_months,
+            COALESCE(SUM(b.open) FILTER (WHERE b.month <= :month AND b.open > 0 AND b.due_date < :today), 0) AS overdue,
+            MAX(b.month) FILTER (WHERE b.month <= :month AND b.open = 0 AND b.paid > 0) AS last_paid_month,
+            COALESCE(SUM(b.paid) FILTER (WHERE b.month > :month AND b.paid > 0), 0) AS paid_ahead,
+            STRING_AGG(b.month, ',' ORDER BY b.month) FILTER (WHERE b.month > :month AND b.paid > 0) AS paid_ahead_months,
+            ${CREDIT_BALANCE_SQL} AS credit,
             (SELECT MAX(p.payment_date) FROM fee_payments p
               WHERE p.fk_student_id = s.id AND p.archived_at IS NULL AND p.status = 'Paid') AS last_payment
        FROM students s
        LEFT JOIN classes c ON c.id = s.fk_class_id
-       LEFT JOIN student_fee_months m ON m.fk_student_id = s.id AND m.archived_at IS NULL
+       LEFT JOIN student_months b ON b.sid = s.id
       WHERE s.fk_school_id = :schoolId AND s.archived_at IS NULL
         ${classId ? "AND s.fk_class_id = :classId" : ""}
       GROUP BY s.id, c.label
       ORDER BY c.label NULLS LAST, s.first_name, s.last_name, s.id`,
-    { schoolId: actor.schoolId, month: target, classId: classId || null },
+    { schoolId: actor.schoolId, month: target, classId: classId || null, today: today() },
   );
 }
 
 const months = (csv) => (csv ? csv.split(",").map(monthLabel).join(", ") : "");
+const countOf = (csv) => (csv ? csv.split(",").length : 0);
 
 async function studentWise(actor, { month, classId }) {
   const target = month || today().slice(0, 7);
   const raw = await studentLedger(actor, { month: target, classId });
   const rows = raw
-    .filter((r) => r.months_billed > 0 || ["Active", "Pending"].includes(r.status))
+    .filter((r) => r.months_billed > 0 || ["Active", "Pending"].includes(r.status) || n(r.credit) > 0)
     .map((r) => ({
       admissionNo: r.admission_no,
       student: fullName(r.first_name, r.last_name),
       className: r.class_label || "",
       status: r.status,
       monthsBilled: r.months_billed,
+      monthsOpen: countOf(r.open_months),
       due: n(r.due),
       paid: n(r.paid),
       outstanding: n(r.outstanding),
-      advance: n(n(r.advance_paid) + n(r.credit)),
+      credit: n(r.credit),
       lastPayment: r.last_payment ? day(r.last_payment) : "",
     }));
   return {
@@ -306,19 +340,20 @@ async function studentWise(actor, { month, classId }) {
     meta: [
       ["Up to month", monthLabel(target)],
       ["Class", await classLabel(actor, classId)],
-      ["Note", "Advance = later months already paid plus unallocated credit."],
+      ["Note", "Months count calendar months (all fee types of a month count once). Credit = live credit-ledger balance."],
     ],
     columns: [
       { key: "admissionNo", label: "Admission no", width: 0.1 },
-      { key: "student", label: "Student", width: 0.17 },
-      { key: "className", label: "Class", width: 0.1 },
-      { key: "status", label: "Status", width: 0.08 },
-      { key: "monthsBilled", label: "Months", type: "number", width: 0.07 },
-      { key: "due", label: "Due", type: "money", width: 0.1 },
-      { key: "paid", label: "Paid", type: "money", width: 0.1 },
-      { key: "outstanding", label: "Outstanding", type: "money", width: 0.1 },
-      { key: "advance", label: "Advance", type: "money", width: 0.08 },
-      { key: "lastPayment", label: "Last payment", width: 0.1 },
+      { key: "student", label: "Student", width: 0.16 },
+      { key: "className", label: "Class", width: 0.09 },
+      { key: "status", label: "Status", width: 0.07 },
+      { key: "monthsBilled", label: "Months billed", type: "number", width: 0.07 },
+      { key: "monthsOpen", label: "Months open", type: "number", width: 0.07 },
+      { key: "due", label: "Due (PKR)", type: "money", width: 0.1 },
+      { key: "paid", label: "Paid (PKR)", type: "money", width: 0.1 },
+      { key: "outstanding", label: "Outstanding (PKR)", type: "money", width: 0.1 },
+      { key: "credit", label: "Credit (PKR)", type: "money", width: 0.07 },
+      { key: "lastPayment", label: "Last payment", width: 0.07 },
     ],
     rows,
     summary: [
@@ -326,7 +361,7 @@ async function studentWise(actor, { month, classId }) {
       ["Due to date (PKR)", money(sum(rows, "due"))],
       ["Paid to date (PKR)", money(sum(rows, "paid"))],
       ["Outstanding (PKR)", money(sum(rows, "outstanding"))],
-      ["Advance (PKR)", money(sum(rows, "advance"))],
+      ["Credit balance (PKR)", money(sum(rows, "credit"))],
     ],
   };
 }
@@ -347,6 +382,7 @@ async function outstandingReport(actor, { month, classId }) {
         months: months(r.open_months),
         oldest: open.length ? monthLabel(open[0]) : "",
         outstanding: n(r.outstanding),
+        credit: n(r.credit),
       };
     })
     .sort((a, b) => b.outstanding - a.outstanding || a.student.localeCompare(b.student));
@@ -355,20 +391,26 @@ async function outstandingReport(actor, { month, classId }) {
     title: "Outstanding fees",
     filename: `outstanding-fees-${target}`,
     filters: { month: target, classId: classId || null },
-    meta: [["Up to month", monthLabel(target)], ["Class", await classLabel(actor, classId)]],
+    meta: [
+      ["Up to month", monthLabel(target)],
+      ["Class", await classLabel(actor, classId)],
+      ["Note", "Open months count calendar months, not bills."],
+    ],
     columns: [
       { key: "admissionNo", label: "Admission no", width: 0.11 },
-      { key: "student", label: "Student", width: 0.18 },
-      { key: "className", label: "Class", width: 0.11 },
+      { key: "student", label: "Student", width: 0.17 },
+      { key: "className", label: "Class", width: 0.1 },
       { key: "status", label: "Status", width: 0.08 },
       { key: "openMonths", label: "Open months", type: "number", width: 0.08 },
-      { key: "months", label: "Unpaid months", width: 0.22 },
-      { key: "oldest", label: "Oldest", width: 0.09 },
-      { key: "outstanding", label: "Outstanding", type: "money", width: 0.13 },
+      { key: "months", label: "Unpaid months", width: 0.2 },
+      { key: "oldest", label: "Oldest", width: 0.08 },
+      { key: "outstanding", label: "Outstanding (PKR)", type: "money", width: 0.11 },
+      { key: "credit", label: "Credit (PKR)", type: "money", width: 0.07 },
     ],
     rows,
     summary: [
       ["Students with dues", rows.length],
+      ["Open student-months", rows.reduce((s, r) => s + r.openMonths, 0)],
       ["Total outstanding (PKR)", money(sum(rows, "outstanding"))],
     ],
   };
@@ -378,41 +420,87 @@ async function advanceReport(actor, { month, classId }) {
   const target = month || today().slice(0, 7);
   const raw = await studentLedger(actor, { month: target, classId });
   const rows = raw
-    .filter((r) => n(r.advance_paid) > 0 || n(r.credit) > 0)
+    .filter((r) => n(r.paid_ahead) > 0 || n(r.credit) > 0)
     .map((r) => ({
       admissionNo: r.admission_no,
       student: fullName(r.first_name, r.last_name),
       className: r.class_label || "",
-      months: months(r.advance_months),
-      prepaid: n(r.advance_paid),
       credit: n(r.credit),
-      total: n(n(r.advance_paid) + n(r.credit)),
-    }));
+      months: months(r.paid_ahead_months),
+      paidAhead: n(r.paid_ahead),
+    }))
+    .sort((a, b) => b.credit - a.credit || a.student.localeCompare(b.student));
   return {
     kind: "advance",
-    title: "Advance payments",
-    filename: `advance-payments-${target}`,
+    title: "Advance & credit balances",
+    filename: `advance-credit-${target}`,
     filters: { month: target, classId: classId || null },
     meta: [
       ["After month", monthLabel(target)],
       ["Class", await classLabel(actor, classId)],
-      ["Note", "Prepaid = money already allocated to months after the selected month. Credit = receipt money not yet allocated to any month."],
+      ["Note", "Credit = live balance of the student credit ledger (auto-applied to the next bills). Paid ahead = money already allocated to months after the selected month."],
     ],
     columns: [
-      { key: "admissionNo", label: "Admission no", width: 0.12 },
-      { key: "student", label: "Student", width: 0.2 },
-      { key: "className", label: "Class", width: 0.12 },
-      { key: "months", label: "Prepaid months", width: 0.22 },
-      { key: "prepaid", label: "Prepaid", type: "money", width: 0.11 },
-      { key: "credit", label: "Credit", type: "money", width: 0.1 },
-      { key: "total", label: "Total advance", type: "money", width: 0.13 },
+      { key: "admissionNo", label: "Admission no", width: 0.13 },
+      { key: "student", label: "Student", width: 0.22 },
+      { key: "className", label: "Class", width: 0.13 },
+      { key: "credit", label: "Credit balance (PKR)", type: "money", width: 0.15 },
+      { key: "months", label: "Months paid ahead", width: 0.22 },
+      { key: "paidAhead", label: "Paid ahead (PKR)", type: "money", width: 0.15 },
     ],
     rows,
     summary: [
-      ["Students with advance", rows.length],
-      ["Prepaid months (PKR)", money(sum(rows, "prepaid"))],
-      ["Unallocated credit (PKR)", money(sum(rows, "credit"))],
-      ["Total advance (PKR)", money(sum(rows, "total"))],
+      ["Students with credit or advance", rows.length],
+      ["Credit balance (PKR)", money(sum(rows, "credit"))],
+      ["Paid ahead for later months (PKR)", money(sum(rows, "paidAhead"))],
+    ],
+  };
+}
+
+async function defaulters(actor, { month, classId }) {
+  const target = month || today().slice(0, 7);
+  const raw = await studentLedger(actor, { month: target, classId });
+  const rows = raw
+    .filter((r) => n(r.overdue) > 0)
+    .map((r) => ({
+      admissionNo: r.admission_no,
+      student: fullName(r.first_name, r.last_name),
+      className: r.class_label || "",
+      status: r.status,
+      lastPaid: r.last_paid_month ? monthLabel(r.last_paid_month) : "Never",
+      lastPayment: r.last_payment ? day(r.last_payment) : "",
+      monthsUnpaid: countOf(r.overdue_months),
+      months: months(r.overdue_months),
+      outstanding: n(r.overdue),
+    }))
+    .sort((a, b) => b.monthsUnpaid - a.monthsUnpaid || b.outstanding - a.outstanding || a.student.localeCompare(b.student));
+  return {
+    kind: "defaulters",
+    title: "Defaulters list",
+    filename: `defaulters-${target}`,
+    filters: { month: target, classId: classId || null },
+    meta: [
+      ["Up to month", monthLabel(target)],
+      ["Class", await classLabel(actor, classId)],
+      ["Overdue as of", today()],
+      ["Note", "A defaulter has at least one month past its due date that is not fully paid. Last paid = latest fully paid month."],
+    ],
+    columns: [
+      { key: "admissionNo", label: "Admission no", width: 0.1 },
+      { key: "student", label: "Student", width: 0.16 },
+      { key: "className", label: "Class", width: 0.1 },
+      { key: "status", label: "Status", width: 0.07 },
+      { key: "lastPaid", label: "Last paid", width: 0.09 },
+      { key: "lastPayment", label: "Last payment", width: 0.09 },
+      { key: "monthsUnpaid", label: "Months unpaid", type: "number", width: 0.08 },
+      { key: "months", label: "Overdue months", width: 0.19 },
+      { key: "outstanding", label: "Outstanding (PKR)", type: "money", width: 0.12 },
+    ],
+    rows,
+    summary: [
+      ["Defaulters", rows.length],
+      ["Overdue student-months", rows.reduce((s, r) => s + r.monthsUnpaid, 0)],
+      ["Overdue amount (PKR)", money(sum(rows, "outstanding"))],
     ],
   };
 }
@@ -424,6 +512,7 @@ const BUILDERS = {
   "student-wise": studentWise,
   outstanding: outstandingReport,
   advance: advanceReport,
+  defaulters,
 };
 
 async function build(actor, kind, filters = {}) {

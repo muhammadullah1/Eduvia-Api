@@ -6,7 +6,7 @@
  * `branded_document.js`). Every format carries the same rows, so a
  * downloaded file always matches what the screen showed.
  *
- *   columns: [{ key, label, type: "text" | "number" | "money", width }]
+ *   columns: [{ key, label, type: "text" | "number" | "money" | "percent", width }]
  *   meta:    [[label, value]]   (the filters the report was run with)
  *   summary: [[label, value]] or null (totals; omitted for roles without totals)
  */
@@ -24,11 +24,12 @@ const MIME = {
 const money = (value) =>
   Number(value || 0).toLocaleString("en-PK", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
 
-const isNumeric = (column) => column.type === "money" || column.type === "number";
+const isNumeric = (column) => column.type === "money" || column.type === "number" || column.type === "percent";
 
 function cellText(column, value) {
   if (value == null || value === "") return "";
   if (column.type === "money") return money(value);
+  if (column.type === "percent") return `${value}%`;
   return String(value);
 }
 
@@ -77,7 +78,7 @@ async function toXlsx(report, brand) {
     const line = sheet.getRow(headRow + 1 + i);
     line.values = report.columns.map((c) => rawValue(c, row[c.key]));
     report.columns.forEach((c, col) => {
-      if (isNumeric(c)) line.getCell(col + 1).numFmt = c.type === "money" ? "#,##0.##" : "0";
+      if (isNumeric(c)) line.getCell(col + 1).numFmt = c.type === "money" ? "#,##0.##" : c.type === "percent" ? '0.0"%"' : "0";
     });
   });
   sheet.views = [{ state: "frozen", ySplit: headRow }];

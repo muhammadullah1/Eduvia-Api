@@ -31,11 +31,25 @@ const bodies = {
   }).min(1),
 };
 
+const KEY_ALIASES = {
+  "daily-tests": SETTING_KEYS.DAILY_TEST_RULES,
+  "daily-test-rules": SETTING_KEYS.DAILY_TEST_RULES,
+  "result-visibility": SETTING_KEYS.RESULT_VISIBILITY,
+  results: SETTING_KEYS.RESULT_VISIBILITY,
+};
+
 module.exports = {
   validateUpdate: {
-    params: Joi.object({ key: Joi.string().valid(...Object.keys(bodies)).required() }),
+    params: Joi.object({
+      key: Joi.string()
+        .valid(...Object.keys(bodies), ...Object.keys(KEY_ALIASES))
+        .required(),
+    }),
     body: Joi.alternatives().conditional(Joi.ref("/params.key"), {
-      switch: Object.entries(bodies).map(([key, schema]) => ({ is: key, then: schema })),
+      switch: [
+        ...Object.entries(bodies).map(([key, schema]) => ({ is: key, then: schema })),
+        ...Object.entries(KEY_ALIASES).map(([alias, targetKey]) => ({ is: alias, then: bodies[targetKey] })),
+      ],
     }),
   },
 };

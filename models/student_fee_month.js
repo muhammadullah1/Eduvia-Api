@@ -38,23 +38,23 @@ module.exports = (sequelize, DataTypes) => {
         field: "fee_type",
       },
       baseAmount: {
-        type: DataTypes.DECIMAL(10, 2),
+        type: DataTypes.DECIMAL(12, 2),
         allowNull: false,
         field: "base_amount",
       },
       discountAmount: {
-        type: DataTypes.DECIMAL(10, 2),
+        type: DataTypes.DECIMAL(12, 2),
         allowNull: false,
         defaultValue: 0.0,
         field: "discount_amount",
       },
       netAmount: {
-        type: DataTypes.DECIMAL(10, 2),
+        type: DataTypes.DECIMAL(12, 2),
         allowNull: false,
         field: "net_amount",
       },
       paidAmount: {
-        type: DataTypes.DECIMAL(10, 2),
+        type: DataTypes.DECIMAL(12, 2),
         allowNull: false,
         defaultValue: 0.0,
         field: "paid_amount",

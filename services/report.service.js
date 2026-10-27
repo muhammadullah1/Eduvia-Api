@@ -12,6 +12,7 @@ const {
   FeePayments,
   StudentFeeMonths,
   Expenses,
+  OtherIncomes,
 } = require("../models");
 const { USER_ROLES, STUDENT_STATUS, SHEET_STATUS } = require("../constants");
 const { can } = require("../constants/permissions");
@@ -33,7 +34,7 @@ async function managementDashboard(user) {
   const schoolId = user.schoolId;
   const session = await AcademicSessions.findOne({ where: { fkSchoolId: schoolId, isCurrent: true } });
   const current = monthStamp(today());
-  const [classCount, subjectCount, teacherCount, students, exams, sheets, feeMonths, payments, expenses, classRows] = await Promise.all([
+  const [classCount, subjectCount, teacherCount, students, exams, sheets, feeMonths, payments, expenses, otherIncomes, classRows] = await Promise.all([
     Classes.count({ where: { fkSchoolId: schoolId, ...(session ? { fkSessionId: session.id } : {}) } }),
     Subjects.count({ where: { fkSchoolId: schoolId } }),
     Teachers.count({ where: { fkSchoolId: schoolId } }),
@@ -47,6 +48,7 @@ async function managementDashboard(user) {
     StudentFeeMonths.findAll({ where: { fkSchoolId: schoolId }, attributes: ["month", "status", "netAmount", "paidAmount"] }),
     FeePayments.findAll({ where: { fkSchoolId: schoolId, status: "Paid" }, attributes: ["amountPaid", "paymentDate"] }),
     Expenses.findAll({ where: { fkSchoolId: schoolId }, attributes: ["amount", "expenseDate"] }),
+    OtherIncomes.findAll({ where: { fkSchoolId: schoolId }, attributes: ["amount", "incomeDate"] }),
     Classes.findAll({ where: { fkSchoolId: schoolId }, attributes: ["id", "label"] }),
   ]);
 
@@ -122,7 +124,11 @@ async function managementDashboard(user) {
     const sessionPayments = payments.filter((payment) => !session || inSession(payment.paymentDate, session));
     const sessionExpenses = expenses.filter((expense) => !session || inSession(expense.expenseDate, session));
     const thisMonth = feeMonths.filter((month) => monthStamp(month.month) === current);
-    const income = sessionPayments.reduce((sum, payment) => sum + Number(payment.amountPaid), 0);
+    const sessionOther = otherIncomes.filter((entry) => !session || inSession(entry.incomeDate, session));
+    const feeIncome = sessionPayments.reduce((sum, payment) => sum + Number(payment.amountPaid), 0);
+    const otherIncome = sessionOther.reduce((sum, entry) => sum + Number(entry.amount), 0);
+    // Step 8: income = fee collections (Paid payments) + other income, same basis as the Finance report.
+    const income = Math.round((feeIncome + otherIncome) * 100) / 100;
     const expenseTotal = sessionExpenses.reduce((sum, expense) => sum + Number(expense.amount), 0);
     cards.fees = {
       collectedThisMonth: sessionPayments
@@ -135,11 +141,16 @@ async function managementDashboard(user) {
         .reduce((sum, month) => sum + Math.max(0, Number(month.netAmount) - Number(month.paidAmount)), 0),
       advance: feeMonths.filter((month) => month.status === "Advance").reduce((sum, month) => sum + Number(month.paidAmount), 0),
     };
-    cards.finance = { income, expenses: expenseTotal, net: income - expenseTotal };
+    cards.finance = { income, feeIncome, otherIncome, expenses: expenseTotal, net: Math.round((income - expenseTotal) * 100) / 100 };
     const collection = {};
     for (const payment of sessionPayments) {
       const key = monthStamp(payment.paymentDate);
       collection[key] = (collection[key] || 0) + Number(payment.amountPaid);
+    }
+    const incomeByMonth = { ...collection };
+    for (const entry of sessionOther) {
+      const key = monthStamp(entry.incomeDate);
+      incomeByMonth[key] = (incomeByMonth[key] || 0) + Number(entry.amount);
     }
     const expenseByMonth = {};
     for (const expense of sessionExpenses) {
@@ -151,9 +162,9 @@ async function managementDashboard(user) {
       { label: "Paid", count: thisMonth.filter((month) => month.status === "Paid" || month.status === "Advance").length },
       { label: "Unpaid", count: thisMonth.filter((month) => month.status === "Unpaid" || month.status === "Partially Paid").length },
     ];
-    graphs.incomeVsExpenses = [...new Set([...Object.keys(collection), ...Object.keys(expenseByMonth)])].sort().map((month) => ({
+    graphs.incomeVsExpenses = [...new Set([...Object.keys(incomeByMonth), ...Object.keys(expenseByMonth)])].sort().map((month) => ({
       month,
-      income: collection[month] || 0,
+      income: incomeByMonth[month] || 0,
       expenses: expenseByMonth[month] || 0,
     }));
   }

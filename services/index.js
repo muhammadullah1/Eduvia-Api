@@ -29,6 +29,7 @@ module.exports = {
   accessService: require("./access.service"),
   superMasterService: require("./super_master.service"),
   expenseService: require("./expense.service"),
+  financeService: require("./finance.service"),
   noticeService: require("./notice.service"),
   emailService: require("./email.service"),
   leaveService: require("./leave.service"),

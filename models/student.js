@@ -73,7 +73,7 @@ module.exports = (sequelize, DataTypes) => {
         field: "discount_percent",
       },
       fixedMonthlyFee: {
-        type: DataTypes.DECIMAL(10, 2),
+        type: DataTypes.DECIMAL(12, 2),
         allowNull: true,
         field: "fixed_monthly_fee",
       },

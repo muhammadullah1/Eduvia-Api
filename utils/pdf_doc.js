@@ -14,13 +14,17 @@ const PAGE = { portrait: [595.28, 841.89], landscape: [841.89, 595.28] }; // A4
 const HELV = [278,278,355,556,556,889,667,191,333,333,389,584,278,333,278,278,556,556,556,556,556,556,556,556,556,556,278,278,584,584,584,556,1015,667,667,722,722,667,611,778,722,278,500,667,556,833,722,778,667,778,722,667,611,722,667,944,667,667,611,278,278,278,469,556,333,556,556,500,556,556,278,556,556,222,222,500,222,833,556,556,556,556,333,500,278,556,500,722,500,500,500,334,260,334,584];
 const HELV_BOLD = [278,333,474,556,556,889,722,238,333,333,389,584,278,333,278,278,556,556,556,556,556,556,556,556,556,556,333,333,584,584,584,611,975,722,722,722,722,667,611,778,722,278,556,722,611,833,722,778,667,778,722,667,611,722,667,944,667,667,611,333,278,333,584,556,333,556,611,556,611,556,333,611,611,278,278,556,278,889,611,611,611,611,389,556,333,611,556,778,556,556,500,389,280,389,584];
 
-/** Text the base-14 fonts can show: Latin-1 only; anything else becomes "?". */
+/**
+ * Text the base-14 fonts can show: Latin-1 plus the WinAnsi en / em dash
+ * (0x96 / 0x97), so "Jul\u2013Sep" prints as on screen; anything else becomes "?".
+ */
 function clean(text) {
   return String(text ?? "")
     .replace(/[\u2018\u2019]/g, "'")
     .replace(/[\u201C\u201D]/g, '"')
-    .replace(/[\u2013\u2014]/g, "-")
-    .replace(/[^\x20-\x7E\xA0-\xFF]/g, "?");
+    .replace(/\u2013/g, "\x96")
+    .replace(/\u2014/g, "\x97")
+    .replace(/[^\x20-\x7E\x96\x97\xA0-\xFF]/g, "?");
 }
 
 function textWidth(text, size, bold = false) {
@@ -28,7 +32,7 @@ function textWidth(text, size, bold = false) {
   let units = 0;
   for (const ch of clean(text)) {
     const code = ch.charCodeAt(0);
-    units += code >= 32 && code <= 126 ? table[code - 32] : 556;
+    units += code >= 32 && code <= 126 ? table[code - 32] : code === 0x97 ? 1000 : 556;
   }
   return (units * size) / 1000;
 }
@@ -39,6 +43,27 @@ function fit(text, width, size, bold = false) {
   if (textWidth(value, size, bold) <= width) return value;
   while (value.length && textWidth(`${value}...`, size, bold) > width) value = value.slice(0, -1);
   return `${value}...`;
+}
+
+/**
+ * Word-wraps `text` into at most `maxLines` lines of `width` points; the last
+ * line is shortened with "..." only if the words still do not fit.
+ */
+function wrap(text, width, size, bold = false, maxLines = 3) {
+  const words = clean(text).split(/\s+/).filter(Boolean);
+  const lines = [];
+  let current = "";
+  for (const word of words) {
+    const next = current ? `${current} ${word}` : word;
+    if (!current || textWidth(next, size, bold) <= width) current = next;
+    else {
+      lines.push(current);
+      current = word;
+    }
+  }
+  if (current) lines.push(current);
+  if (lines.length > maxLines) lines.splice(maxLines - 1, lines.length, lines.slice(maxLines - 1).join(" "));
+  return lines.map((line) => fit(line, width, size, bold));
 }
 
 const escape = (text) => clean(text).replace(/[\\()]/g, (ch) => `\\${ch}`);
@@ -151,14 +176,20 @@ class PdfDoc {
     const usable = this.width - this.margin * 2;
     const total = columns.reduce((s, c) => s + c.width, 0);
     const widths = columns.map((c) => (total <= 1.0001 ? c.width * usable : (c.width / total) * usable));
+    // Header labels wrap onto extra lines instead of being cut off ("Paid stude...").
+    const labels = columns.map((c, i) => wrap(c.label, widths[i] - 8, size, true));
+    const lineGap = size + 2;
+    const headerHeight = rowHeight + (Math.max(1, ...labels.map((l) => l.length)) - 1) * lineGap;
     const header = () => {
       let x = this.margin;
-      this.rect(this.margin, this.y, usable, rowHeight, { fill: headerFill, stroke: false });
+      this.rect(this.margin, this.y, usable, headerHeight, { fill: headerFill, stroke: false });
       columns.forEach((c, i) => {
-        this.text(x + 4, this.y + rowHeight - 5, c.label, { size, bold: true, width: widths[i] - 8, align: c.align || "left", color: headerColor });
+        labels[i].forEach((line, k) => {
+          this.text(x + 4, this.y + rowHeight - 5 + k * lineGap, line, { size, bold: true, width: widths[i] - 8, align: c.align || "left", color: headerColor });
+        });
         x += widths[i];
       });
-      this.cursorDown(rowHeight);
+      this.cursorDown(headerHeight);
     };
     header();
     rows.forEach((row, index) => {
