@@ -99,6 +99,12 @@ const PERMISSIONS = {
   "fees.structure.update": [SA],
   "fees.credit.read": [SA, ACC, PAR],
   "fees.import": [SA, ACC], // offline sync (Excel import) + its upload history
+  "fees.concessions.read": [SA, ACC, PAR],
+  "fees.concessions.request": [SA, ACC],
+  "fees.concessions.approve": [SA],
+  "fees.months.adjust": [SA],
+  "families.read": [SA, OPS, ACC],
+  "families.manage": [SA, OPS],
   "income.read": [SA],
   "income.create": [SA],
   "income.manage": [SA],

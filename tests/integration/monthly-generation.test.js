@@ -7,18 +7,31 @@
  * audit history, the student ledger and the role matrix.
  */
 const app = require("../../app");
-const { sequelize, StudentFeeMonths, AuditLogs, AcademicSessions } = require("../../models");
+const { sequelize, StudentFeeMonths, AuditLogs, AcademicSessions, FeeStructures } = require("../../models");
 const { makeSchool, makeUser, tokenFor, makeStudent, makeParent } = require("../helpers/school");
 const { request } = require("../helpers/http");
 const feeService = require("../../services/fee.service");
 const classService = require("../../services/class.service");
-const structure = require("../../services/fee_structure.service");
 const credit = require("../../services/credit_ledger.service");
+const { FEE_TYPE_FREQUENCY } = require("../../constants/finance");
 
 const formClass = (schoolId, sessionId, label, fee = 1000) =>
   classService.create(schoolId, { fkSessionId: sessionId, grade: label, section: "A", label, monthlyTuitionFee: fee, capacity: 30 });
 const call = (token, method, path, body) => request(app, { method, path: `/api${path}`, token, body });
 const actorOf = (u, schoolId, role = "super_admin") => ({ id: u.id, schoolId, role });
+
+/** Seed structure rows directly (session lock blocks mid-session API writes). */
+async function seedFee(fx, feeType, amount, effectiveFrom) {
+  return FeeStructures.create({
+    fkSchoolId: fx.school.id,
+    fkSessionId: fx.session.id,
+    fkClassId: fx.klass.id,
+    feeType,
+    frequency: FEE_TYPE_FREQUENCY[feeType],
+    amount,
+    effectiveFrom,
+  });
+}
 
 const bills = async (studentId) =>
   (await StudentFeeMonths.findAll({ where: { fkStudentId: studentId }, order: [["month", "ASC"], ["id", "ASC"]] }))
@@ -40,7 +53,7 @@ describe("amounts and effective dates", () => {
     const fx = await fixture("Amounts");
     const regular = await makeStudent(fx.school.id, fx.klass.id);
     const fixed = await makeStudent(fx.school.id, fx.klass.id, { fixedMonthlyFee: 700 });
-    await structure.add(fx.actor, fx.klass.id, { feeType: "Tuition", amount: 1200, effectiveFrom: "2026-07-01" });
+    await seedFee(fx, "Tuition", 1200, "2026-07-01");
     await feeService.generateMonths(fx.actor, { month: "2026-08", classId: fx.klass.id });
 
     expect(await bills(regular.id)).toEqual(
@@ -61,7 +74,7 @@ describe("amounts and effective dates", () => {
 describe("separately billed fees", () => {
   test("Annual is billed once per session, in the first generated month it is in force", async () => {
     const fx = await fixture("Annual");
-    await structure.add(fx.actor, fx.klass.id, { feeType: "Annual", amount: 3000, effectiveFrom: "2026-04-01" });
+    await seedFee(fx, "Annual", 3000, "2026-04-01");
     const kid = await makeStudent(fx.school.id, fx.klass.id);
     await feeService.generateMonths(fx.actor, { month: "2026-05", classId: fx.klass.id });
     await feeService.generateMonths(fx.actor, { month: "2027-03", classId: fx.klass.id });
@@ -78,7 +91,7 @@ describe("separately billed fees", () => {
     const fx = await fixture("AnnualLate");
     const kid = await makeStudent(fx.school.id, fx.klass.id);
     await feeService.generateMonths(fx.actor, { month: "2026-06", classId: fx.klass.id });
-    await structure.add(fx.actor, fx.klass.id, { feeType: "Annual", amount: 2500, effectiveFrom: "2026-04-01" });
+    await seedFee(fx, "Annual", 2500, "2026-04-01");
     await feeService.generateMonths(fx.actor, { month: "2026-06", classId: fx.klass.id });
     expect((await bills(kid.id)).some((b) => b.type === "Annual")).toBe(false);
     await feeService.generateMonths(fx.actor, { month: "2026-07", classId: fx.klass.id });
@@ -87,8 +100,8 @@ describe("separately billed fees", () => {
 
   test("Exam is billed in the month its effective row starts (or the month after a mid-month date)", async () => {
     const fx = await fixture("Exam");
-    await structure.add(fx.actor, fx.klass.id, { feeType: "Exam", amount: 800, effectiveFrom: "2026-06-01" });
-    await structure.add(fx.actor, fx.klass.id, { feeType: "Exam", amount: 900, effectiveFrom: "2026-09-15" });
+    await seedFee(fx, "Exam", 800, "2026-06-01");
+    await seedFee(fx, "Exam", 900, "2026-09-15");
     const kid = await makeStudent(fx.school.id, fx.klass.id);
     await feeService.generateMonths(fx.actor, { month: "2026-12", classId: fx.klass.id });
     expect((await bills(kid.id)).filter((b) => b.type === "Exam")).toEqual([
@@ -100,7 +113,7 @@ describe("separately billed fees", () => {
   test("Admission is billed once for new admissions only, never retroactively", async () => {
     const fx = await fixture("Adm");
     const existing = await makeStudent(fx.school.id, fx.klass.id);
-    await structure.add(fx.actor, fx.klass.id, { feeType: "Admission", amount: 5000, effectiveFrom: "2026-04-01" });
+    await seedFee(fx, "Admission", 5000, "2026-04-01")
     const fresh = await makeStudent(fx.school.id, fx.klass.id, { admissionDate: "2026-05-10" });
     await feeService.generateMonths(fx.actor, { month: "2026-07", classId: fx.klass.id });
     await feeService.generateMonths(fx.actor, { month: "2026-08", classId: fx.klass.id });
@@ -110,7 +123,7 @@ describe("separately billed fees", () => {
 
   test("zero-amount extras are not billed", async () => {
     const fx = await fixture("Zero");
-    await structure.add(fx.actor, fx.klass.id, { feeType: "Annual", amount: 0, effectiveFrom: "2026-04-01" });
+    await seedFee(fx, "Annual", 0, "2026-04-01")
     const kid = await makeStudent(fx.school.id, fx.klass.id);
     await feeService.generateMonths(fx.actor, { month: "2026-04", classId: fx.klass.id });
     expect((await bills(kid.id)).map((b) => b.type)).toEqual(["Tuition"]);
@@ -120,8 +133,8 @@ describe("separately billed fees", () => {
 describe("duplicates, preview and audit", () => {
   test("re-running is idempotent and concurrent runs never duplicate a bill", async () => {
     const fx = await fixture("Dup");
-    await structure.add(fx.actor, fx.klass.id, { feeType: "Annual", amount: 3000, effectiveFrom: "2026-04-01" });
-    await structure.add(fx.actor, fx.klass.id, { feeType: "Exam", amount: 500, effectiveFrom: "2026-05-01" });
+    await seedFee(fx, "Annual", 3000, "2026-04-01")
+    await seedFee(fx, "Exam", 500, "2026-05-01")
     const kids = await Promise.all([1, 2, 3].map(() => makeStudent(fx.school.id, fx.klass.id)));
     const ids = kids.map((k) => k.id);
 
@@ -158,7 +171,7 @@ describe("duplicates, preview and audit", () => {
   test("preview writes nothing and matches what generation then creates", async () => {
     const fx = await fixture("Prev");
     const second = await formClass(fx.school.id, fx.session.id, "Prev B", 1500);
-    await structure.add(fx.actor, fx.klass.id, { feeType: "Exam", amount: 600, effectiveFrom: "2026-05-01" });
+    await seedFee(fx, "Exam", 600, "2026-05-01")
     const kids = [
       await makeStudent(fx.school.id, fx.klass.id),
       await makeStudent(fx.school.id, fx.klass.id, { fixedMonthlyFee: 400 }),
@@ -199,7 +212,7 @@ describe("duplicates, preview and audit", () => {
 describe("student ledger", () => {
   test("months, payments (oldest first), statuses and credit balance are accurate", async () => {
     const fx = await fixture("Ledger");
-    await structure.add(fx.actor, fx.klass.id, { feeType: "Exam", amount: 500, effectiveFrom: "2026-04-01" });
+    await seedFee(fx, "Exam", 500, "2026-04-01")
     const kid = await makeStudent(fx.school.id, fx.klass.id);
     await feeService.generateMonths(fx.actor, { month: "2026-06", classId: fx.klass.id });
     await feeService.recordPayment(fx.actor, { studentId: kid.id, amount: 1800, method: "Cash" });
@@ -223,7 +236,7 @@ describe("student ledger", () => {
 
   test("a month with an unpaid extra bill is not counted as paid", async () => {
     const fx = await fixture("MonthPaid");
-    await structure.add(fx.actor, fx.klass.id, { feeType: "Exam", amount: 500, effectiveFrom: "2026-04-01" });
+    await seedFee(fx, "Exam", 500, "2026-04-01")
     const kid = await makeStudent(fx.school.id, fx.klass.id);
     await feeService.generateMonths(fx.actor, { month: "2026-04", classId: fx.klass.id });
     await feeService.recordPayment(fx.actor, { studentId: kid.id, amount: 1000, method: "Cash" });

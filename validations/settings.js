@@ -20,6 +20,7 @@ const bodies = {
     defaultMonthlyFee: Joi.number().min(0),
     dueDay: Joi.number().integer().min(1).max(28),
     maxAdvanceMonths: Joi.number().integer().min(0).max(24),
+    concessionsEnabled: Joi.boolean(),
   }).min(1),
   [SETTING_KEYS.ADMISSION]: Joi.object({
     prefix: Joi.string().max(20),

@@ -46,6 +46,8 @@ router.use("/fees", feeRouter);
 router.use("/expenses", expenseRouter);
 router.use("/finance", require("./finance"));
 router.use("/fee-structures", feeStructureRouter);
+router.use("/fee-concessions", require("./fee_concession"));
+router.use("/families", require("./family"));
 router.use("/updates", noticeRouter);
 router.use("/system-notices", require("./system_notice"));
 router.use("/exams", examRouter);

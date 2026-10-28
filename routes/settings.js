@@ -36,6 +36,11 @@ function authorizeSettingWrite(req, res, next) {
   return next();
 }
 
+const feeTypePolicy = require("../controllers/fee_type_policy");
+
+router.get("/fee-type-policies", authorize("settings.fees.update"), feeTypePolicy.list);
+router.put("/fee-type-policies", authorize("settings.fees.update"), feeTypePolicy.update);
+
 router.get("/", authorize("settings.read"), c.getAll);
 router.put("/:key", normalizeKey, authorizeRoles(writers), authorizeSettingWrite, validate(v.validateUpdate), c.update);
 

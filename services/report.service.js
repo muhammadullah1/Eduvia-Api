@@ -45,7 +45,7 @@ async function managementDashboard(user) {
       attributes: ["id", "status", "fkClassId", "totalMarks", "passingMarks"],
       include: [{ model: MarkSheetRows, as: "rows", attributes: ["obtainedMarks", "isAbsent"] }],
     }),
-    StudentFeeMonths.findAll({ where: { fkSchoolId: schoolId }, attributes: ["month", "status", "netAmount", "paidAmount"] }),
+    StudentFeeMonths.findAll({ where: { fkSchoolId: schoolId }, attributes: ["month", "status", "netAmount", "collectibleAmount", "paidAmount"] }),
     FeePayments.findAll({ where: { fkSchoolId: schoolId, status: "Paid" }, attributes: ["amountPaid", "paymentDate"] }),
     Expenses.findAll({ where: { fkSchoolId: schoolId }, attributes: ["amount", "expenseDate"] }),
     OtherIncomes.findAll({ where: { fkSchoolId: schoolId }, attributes: ["amount", "incomeDate"] }),
@@ -135,10 +135,16 @@ async function managementDashboard(user) {
         .filter((payment) => monthStamp(payment.paymentDate) === current)
         .reduce((sum, payment) => sum + Number(payment.amountPaid), 0),
       paidValue: thisMonth.reduce((sum, month) => sum + Number(month.paidAmount), 0),
-      unpaidValue: thisMonth.reduce((sum, month) => sum + Math.max(0, Number(month.netAmount) - Number(month.paidAmount)), 0),
+      unpaidValue: thisMonth.reduce((sum, month) => {
+        const due = Number(month.collectibleAmount ?? month.netAmount);
+        return sum + Math.max(0, due - Number(month.paidAmount));
+      }, 0),
       outstanding: feeMonths
         .filter((month) => monthStamp(month.month) <= current)
-        .reduce((sum, month) => sum + Math.max(0, Number(month.netAmount) - Number(month.paidAmount)), 0),
+        .reduce((sum, month) => {
+          const due = Number(month.collectibleAmount ?? month.netAmount);
+          return sum + Math.max(0, due - Number(month.paidAmount));
+        }, 0),
       advance: feeMonths.filter((month) => month.status === "Advance").reduce((sum, month) => sum + Number(month.paidAmount), 0),
     };
     cards.finance = { income, feeIncome, otherIncome, expenses: expenseTotal, net: Math.round((income - expenseTotal) * 100) / 100 };

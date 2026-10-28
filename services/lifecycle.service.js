@@ -73,10 +73,10 @@ async function isFinalGrade(klass, transaction) {
 
 async function outstandingOf(studentId, transaction) {
   const months = await StudentFeeMonths.findAll({ where: { fkStudentId: studentId }, transaction });
-  const total = months.reduce(
-    (sum, month) => sum + Math.max(0, Number(month.getDataValue("netAmount")) - Number(month.getDataValue("paidAmount"))),
-    0,
-  );
+  const total = months.reduce((sum, month) => {
+    const due = Number(month.getDataValue("collectibleAmount") ?? month.getDataValue("netAmount"));
+    return sum + Math.max(0, due - Number(month.getDataValue("paidAmount")));
+  }, 0);
   return Math.round(total * 100) / 100;
 }
 

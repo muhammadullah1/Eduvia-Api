@@ -195,9 +195,9 @@ async function monthly(actor, { month, classId }) {
 /** One row per (student, month): bill rows of every fee type summed. */
 const STUDENT_MONTHS_CTE = `student_months AS (
   SELECT m.fk_student_id AS sid, m.month,
-         SUM(m.net_amount) AS net,
+         SUM(m.collectible_amount) AS net,
          SUM(m.paid_amount) AS paid,
-         SUM(GREATEST(m.net_amount - m.paid_amount, 0)) AS open,
+         SUM(GREATEST(m.collectible_amount - m.paid_amount, 0)) AS open,
          COALESCE(MIN(m.due_date), (to_date(m.month || '-01', 'YYYY-MM-DD') + INTERVAL '1 month' - INTERVAL '1 day')::date) AS due_date
     FROM student_fee_months m
    WHERE m.fk_school_id = :schoolId AND m.archived_at IS NULL

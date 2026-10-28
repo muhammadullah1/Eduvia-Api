@@ -182,6 +182,9 @@ exports.SETTING_DEFAULTS = {
     defaultMonthlyFee: 8500,
     dueDay: 10,
     maxAdvanceMonths: 12,
+    // When true, tuition uses Approved concessions instead of students.fixed_monthly_fee.
+    // discount_percent is never applied (explicit product hold).
+    concessionsEnabled: false,
   },
   admission: {
     prefix: "CLS",

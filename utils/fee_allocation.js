@@ -9,6 +9,8 @@ const fromCents = (value) => Math.round(value) / 100;
 function feeMonthStatus({ amountDue, amountPaid, month }, currentMonthStart) {
   const due = cents(amountDue);
   const paid = cents(amountPaid);
+  // Zero-collectible bills (e.g. full waiver) are Paid, not Unpaid.
+  if (due <= 0) return FEE_MONTH_STATUS.PAID;
   if (paid <= 0) return FEE_MONTH_STATUS.UNPAID;
   if (paid < due) return FEE_MONTH_STATUS.PARTIALLY_PAID;
   return month > currentMonthStart ? FEE_MONTH_STATUS.ADVANCE : FEE_MONTH_STATUS.PAID;

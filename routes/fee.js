@@ -33,4 +33,10 @@ router.post("/imports/:id/discard", authorize("fees.import"), validate(v.validat
 router.get("/imports/:id/error-report", authorize("fees.import"), validate(v.validateId), c.importErrorReport);
 router.get("/summary", authorize("fees.totals"), validate(v.validateSummary), c.summary);
 
+const adj = require("../controllers/fee_adjustment");
+const adjV = require("../validations/fee_adjustment");
+router.post("/months/:id/adjustments", authorize("fees.months.adjust"), validate(adjV.validateRequest), adj.request);
+router.post("/adjustments/:id/approve", authorize("fees.months.adjust"), validate(adjV.validateId), adj.approve);
+router.post("/adjustments/:id/reject", authorize("fees.months.adjust"), validate(adjV.validateReject), adj.reject);
+
 module.exports = router;

@@ -169,8 +169,18 @@ async function update(id, schoolId, data) {
   const changes = { ...data };
   delete changes.status;
   const feeBefore = Number(row.monthlyTuitionFee);
+  const feeAfter =
+    changes.monthlyTuitionFee != null
+      ? Number(changes.monthlyTuitionFee)
+      : changes.monthlyFee != null
+        ? Number(changes.monthlyFee)
+        : feeBefore;
+  // Validate structure lock before mutating the class row when tuition changes.
+  if (feeAfter !== feeBefore) {
+    row.monthlyTuitionFee = feeAfter;
+    await feeStructureService().recordClassFee(row);
+  }
   await row.update(changes);
-  if (Number(row.monthlyTuitionFee) !== feeBefore) await feeStructureService().recordClassFee(row);
   return row;
 }
 

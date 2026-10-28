@@ -24,7 +24,8 @@ module.exports = {
         .max(9999999999.99)
         .custom((v, h) => (Math.abs(Math.round(v * 100) - v * 100) < 1e-6 ? v : h.message("amount can have at most 2 decimal places")))
         .required(),
-      effectiveFrom: calendarDay.required(),
+      // Ignored by the service; session.start_date is always used. Kept optional for older clients.
+      effectiveFrom: calendarDay.optional(),
     }),
   },
   validateRemove: {

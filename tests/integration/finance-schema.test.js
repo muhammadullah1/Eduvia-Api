@@ -77,8 +77,8 @@ describe("migration 060 student_credit_ledger", () => {
 
   test("credit can be applied but never taken below zero; amounts must be positive", async () => {
     const months = await sequelize.query(
-      `INSERT INTO student_fee_months (fk_school_id, fk_student_id, month, fee_type, base_amount, discount_amount, net_amount, paid_amount, status, created_at, updated_at)
-       VALUES (${school.id}, ${student.id}, '2026-11', 'Tuition', 4500, 0, 4500, 0, 'Unpaid', NOW(), NOW()) RETURNING id`,
+      `INSERT INTO student_fee_months (fk_school_id, fk_student_id, month, fee_type, base_amount, discount_amount, net_amount, paid_amount, status, adjustment_total, collectible_amount, created_at, updated_at)
+       VALUES (${school.id}, ${student.id}, '2026-11', 'Tuition', 4500, 0, 4500, 0, 'Unpaid', 0, 4500, NOW(), NOW()) RETURNING id`,
       { type: sequelize.QueryTypes.SELECT },
     );
     await creditService.applyCredit(actor(), { studentId: student.id, amount: 500, feeMonthId: months[0].id });
