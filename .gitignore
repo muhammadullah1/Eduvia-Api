@@ -57,3 +57,4 @@ config/environments/
 test.js
 config/tenants.json
 .claude/
+.model_docs/
