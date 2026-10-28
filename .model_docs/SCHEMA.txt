@@ -1,0 +1,243 @@
+i am currently review schema models here is some of my reviews maybe its not good but you can pay attention on it and tell me why to implement and why are not to implement
+1. dynamic roles table currrently our roles has not separeate table there a column in users table
+2. in tachers table the fkSchoolId is nessesary it already fk_user_id it seems duplicatioin
+3. for what we keep employeeCode column in teachers table
+4. students table has no fk_user_id its stand alone table which has same fields as user table has and it has direct fkSchoolId as well why?
+5. student table has status and it has 1 enum Withdrawn what it emans?
+6. parents table has also fkSchoolId its duplication any reason?
+7. student_parents has isPrimary column for what we create this column?
+8. how will be the handling of 1 parent has many child and 1 child has 1 of more parents like father, mother, or gaurdian
+9. we have other roles as well like accountant and operations_manager but it has no separate table or its not needed maybe in futhere there is some case that a person has teacher and accountatn has well how we will handle it just need explalination?
+10. you created utils/model_options.js  but it dont like it every model should have their own column in their own file not to import column a well
+11.  we have school_settings table for what we use this table?
+12. in user table the email is unique i think we need to handle it per school if we have 3 school so the user maybe need to create their record in each school with the same email we will be using different domain for each school
+only for frontend our backend will be same url and same server
+13.  i review the teacher_subject_assignments table here is some of my concern there is fkSchoolId column any need of this?
+14. i seen the teacher_classes table and there will be a follow where the a class can be assign to a teaher only for  specfic date maybe one day (date) or multiple dates is this scnario will be handled in the current schema if a teacher is absent so the user can assign his classes to other teacher as well for that day or days
+15.  next table is substitute_assignments there is also fkSchoolId column its needed here?
+16. next table isteacher_absences and there is also fkSchoolId column it needed?
+17. i review the student_fee_months table there is also fkSchoolId its required here as well?  and there will be more then 50% students who did not paid the fees of old months as well and new will there as well and there will be new year admission etch feeses as well so it will be handled in the current schema as well or not?
+
+18. i review the  attendances table what will be the case of student present , absence in same date or day the attendace can be marked in morning and the student can be leave the school or take the school before ending all classes and what will be the case where father can request for a leave for a specfic date i did not seen any related table like absene table or absence table
+“use strict”;
+
+module.exports = (sequelize, DataTypes) => {
+  const Absence = sequelize.define(“absence”, {
+    id: {
+      allowNull: false,
+      autoIncrement: true,
+      primaryKey: true,
+      type: DataTypes.INTEGER,
+    }
+    fk_attendance_id: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+    },
+    absent_details: {
+      type: DataTypes.STRING,
+      allowNull: true,
+    },
+    archive: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: false,
+    },
+    createdAt: {
+      allowNull: false,
+      type: DataTypes.INTEGER,
+    },
+    updatedAt: {
+      allowNull: false,
+      type: DataTypes.INTEGER,
+    },
+  });
+  Absence.beforeCreate((report) => {
+    report.dataValues.createdAt = moment().utc().unix();
+    report.dataValues.updatedAt = moment().utc().unix();
+  });
+  Absence.beforeUpdate((report) => {
+    report.dataValues.updatedAt = moment().utc().unix();
+  });
+
+  Absence.associate = (models) => {
+    Absence.belongsTo(models.Attendance, {
+      foreignKey: “fk_attendance_id”,
+      as: “attendance”,
+    });
+  };
+
+  return Absence;
+};
+
+19. can you explain the fee_payments schema i dont get it 
+"use strict";
+
+const { archivable, id, ref } = require("../utils/model_options");
+
+module.exports = (sequelize, DataTypes) => {
+  const FeePayment = sequelize.define("fee_payments", {
+    id: {
+      allowNull: false,
+      autoIncrement: true,
+      primaryKey: true,
+      type: DataTypes.INTEGER
+    },
+    fkSchoolId: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      field: "fk_school_id"
+    },
+    ref: {
+      type: DataTypes.STRING,
+      allowNull: false,
+      unique: true
+    },
+    fkStudentId: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      field: "fk_student_id"
+    },
+    period: {
+      type: DataTypes.STRING,
+      allowNull: true
+    },
+    type: {
+      type: DataTypes.STRING,
+      allowNull: false
+    },
+    amount: {
+      type: DataTypes.DECIMAL(12, 2),
+      allowNull: false
+    },
+    method: {
+      type: DataTypes.STRING,
+      allowNull: true
+    },
+    status: {
+      type: DataTypes.ENUM("Paid", "Pending"),
+      allowNull: false,
+      defaultValue: "Pending"
+    },
+    paidOn: {
+      type: DataTypes.DATEONLY,
+      allowNull: true,
+      field: "paid_on"
+    },
+    dueDate: {
+      type: DataTypes.DATEONLY,
+      allowNull: true,
+      field: "due_date"
+    },
+    notes: {
+      type: DataTypes.TEXT,
+      allowNull: true
+    },
+    fkRecordedByUserId: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      field: "fk_recorded_by_user_id"
+    },
+    idempotencyKey: {
+      type: DataTypes.STRING(128),
+      allowNull: true,
+      unique: true,
+      field: "idempotency_key"
+    },
+    unallocatedAmount: {
+      type: DataTypes.DECIMAL(12, 2),
+      allowNull: false,
+      defaultValue: 0,
+      field: "unallocated_amount"
+    },
+    allocationMode: {
+      type: DataTypes.ENUM("auto", "manual"),
+      allowNull: false,
+      defaultValue: "auto",
+      field: "allocation_mode",
+    },
+  },
+    {
+      tableName: "fee_payments",
+      paranoid: true,
+      timestamps: true,
+      createdAt: "created_at",
+      updatedAt: "updated_at",
+      deletedAt: "archived_at",
+      underscored: true,
+    },
+  );
+
+  FeePayment.associate = (models) => {
+    FeePayment.belongsTo(models.Schools, {
+      foreignKey: "fkSchoolId",
+      as: "school"
+    });
+    FeePayment.belongsTo(models.Students, {
+      foreignKey: "fkStudentId",
+      as: "student"
+    });
+    FeePayment.belongsTo(models.Users, {
+      foreignKey: "fkRecordedByUserId",
+      as: "recordedBy"
+    });
+    FeePayment.hasMany(models.FeeAllocations, {
+      foreignKey: "fkPaymentId",
+      as: "allocations"
+    });
+  };
+
+  return FeePayment;
+};
+
+20. i review the fee_allocations what the concept of this table for what it will be using
+21. i expenses table need a column to for identify who added the record who added this expenses like fk_user_id
+22. can you explain the audit_logs table why it added what the purpose of this table
+23. can you explain the purpase of feeMonth: {
+        type: DataTypes.STRING(7),
+        allowNull: true,
+        field: "fee_month"
+      }, 
+in exams  tabel and why we added fkClassId exam will be 1 records and we can added multiple calsses in exam so need a nested able for 
+for exam like exam_classes
+24. in mark_sheets we have fkExamId why we added examName? any usage any case
+there is also fkSubjectId then why you added  subject: {
+      type: DataTypes.STRING,
+      allowNull: false
+    }, as string
+ and there is fkSchoolId which is duplicate in exam table fkSchoolId already exits
+ and we keep fkClassId, fkSubjectId i am so confused on this table 
+
+
+25. in a school there will be many classes and each classes maybe there is many sections
+so our classes schema need refactoring and class and grade are same
+there is more column like periodCount its not good there will subjects of each class
+
+26.in student_parents table there is isPrimary boolean ttype column  any need of this?
+
+27. we have table applications who is applicant its name not good
+and there is also gaurdian column why and there is also fkClassId
+maybe a student take admession in 1 one and he can be promoted after exam so 
+can we handle it in this schema
+there is also many column reltaed to guardian 
+and currently the our cases there is no online admession this table need refacotoring and 
+also seen the parent and student_parents schemas as well
+
+28. in daily_lessons there is  fkSchoolId not needed 
+can you explain this model little bit 
+there is alot of thigs going one even alsswork remarks etch
+and there is fkPlannedChapterId id which comes from 
+planned_chapters and ther is also fkClassId,  fkSubjectId
+and there is fk_school_id as well not needed here so its diplicateion of data
+
+29. in daily_tests we have fkSchoolId its needed here and there is fkScheduleId
+which come from daily_test_schedules table and there is well
+same column which is duplicate why so 
+bad 
+
+30. in monthly_student_summaries there is fkClassid so no need for fkschoolId here as well
+
+31. i seen the result_visibility_overrides
+we have 2 cases
+1. if a student has paid the fee the result will be ResultVisibilityOverride
+2. and even if the fee is not paid but the super_admin approve it then it will be ResultVisibilityOverride
+
