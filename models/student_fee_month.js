@@ -98,7 +98,8 @@ module.exports = (sequelize, DataTypes) => {
       hooks: {
         beforeValidate(instance) {
           if (!instance.isNewRecord) return;
-          const net = instance.netAmount != null ? instance.netAmount : instance.getDataValue("netAmount");
+          let net = instance.netAmount;
+          if (net == null) net = instance.getDataValue("netAmount");
           if (net == null) return;
           // Mirror net unless the caller explicitly set collectibleAmount.
           if (!instance.changed("collectibleAmount")) {
@@ -109,7 +110,8 @@ module.exports = (sequelize, DataTypes) => {
       getterMethods: {
         amountDue() {
           const collectible = this.getDataValue("collectibleAmount");
-          return collectible != null ? collectible : this.getDataValue("netAmount");
+          if (collectible != null) return collectible;
+          return this.getDataValue("netAmount");
         },
         amountPaid() {
           return this.getDataValue("paidAmount");

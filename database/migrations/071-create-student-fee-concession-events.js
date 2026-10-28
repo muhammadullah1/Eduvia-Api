@@ -3,38 +3,69 @@
 /**
  * Append-only status history for student fee concessions.
  */
+
+/** @type {import('sequelize-cli').Migration} */
 module.exports = {
   async up(queryInterface, Sequelize) {
     await queryInterface.sequelize.transaction(async (transaction) => {
       await queryInterface.createTable(
         "student_fee_concession_events",
         {
-          id: { allowNull: false, autoIncrement: true, primaryKey: true, type: Sequelize.INTEGER },
+          id: {
+            allowNull: false,
+            autoIncrement: true,
+            primaryKey: true,
+            type: Sequelize.INTEGER,
+          },
           fk_concession_id: {
             type: Sequelize.INTEGER,
             allowNull: false,
-            references: { model: "student_fee_concessions", key: "id" },
+            references: {
+              model: "student_fee_concessions",
+              key: "id",
+            },
             onUpdate: "CASCADE",
             onDelete: "CASCADE",
           },
-          event_type: { type: Sequelize.STRING(40), allowNull: false },
-          from_status: { type: Sequelize.STRING(30), allowNull: true },
-          to_status: { type: Sequelize.STRING(30), allowNull: true },
+          event_type: {
+            type: Sequelize.STRING(40),
+            allowNull: false,
+          },
+          from_status: {
+            type: Sequelize.STRING(30),
+            allowNull: true,
+          },
+          to_status: {
+            type: Sequelize.STRING(30),
+            allowNull: true,
+          },
           fk_actor_user_id: {
             type: Sequelize.INTEGER,
             allowNull: true,
-            references: { model: "users", key: "id" },
+            references: {
+              model: "users",
+              key: "id",
+            },
             onUpdate: "CASCADE",
             onDelete: "SET NULL",
           },
-          payload: { type: Sequelize.JSONB, allowNull: true },
-          created_at: { allowNull: false, type: Sequelize.DATE, defaultValue: Sequelize.fn("NOW") },
+          payload: {
+            type: Sequelize.JSONB,
+            allowNull: true,
+          },
+          created_at: {
+            allowNull: false,
+            type: Sequelize.DATE,
+            defaultValue: Sequelize.literal("CURRENT_TIMESTAMP"),
+          },
         },
-        { transaction },
+        { transaction }
       );
+
       await queryInterface.sequelize.query(
-        `CREATE INDEX idx_concession_events_concession ON student_fee_concession_events (fk_concession_id, created_at DESC)`,
-        { transaction },
+        `CREATE INDEX idx_concession_events_concession
+           ON student_fee_concession_events (fk_concession_id, created_at DESC)`,
+        { transaction }
       );
     });
   },
