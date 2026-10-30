@@ -7,7 +7,9 @@ const { makeSchool, makeUser, makeClass, makeStudent } = require("../helpers/sch
 const creditBackfill = require("../../database/migrations/060-student-credit-ledger").BACKFILL_SQL;
 const creditService = require("../../services/credit_ledger.service");
 const feeStructureService = require("../../services/fee_structure.service");
-const { can } = require("../../constants/permissions");
+const { defaultPermissionsFor, isGrantable } = require("../../constants/permissions");
+
+const can = (role, key) => defaultPermissionsFor(role).includes(key);
 const otherIncomeValidation = require("../../validations/other_income");
 const feeStructureValidation = require("../../validations/fee_structure");
 
@@ -32,7 +34,10 @@ describe("migration 059 fee_structures", () => {
   // The 059 backfill (class fee -> Tuition row) ran during migration up/down/up; its
   // ON CONFLICT target was replaced by 063's effective-date index, so it is not re-run here.
   test("fee structure view lists the four types and counts only monthly fees", async () => {
-    await FeeStructures.create({ fkSchoolId: school.id, fkSessionId: session.id, fkClassId: klass.id, feeType: "Tuition", frequency: "Monthly", amount: 4500, effectiveFrom: "2026-04-01" });
+    const tuition = await FeeStructures.findOne({
+      where: { fkClassId: klass.id, feeType: "Tuition" },
+    });
+    await tuition.update({ amount: 4500 });
     const view = await feeStructureService.forClass(school.id, klass.id, { asOf: "2026-05-01" });
     expect(view.fees.map((f) => f.feeType)).toEqual(["Tuition"]);
     expect(view.monthlyTotal).toBe(4500);
@@ -152,6 +157,8 @@ describe("finance permissions and validation scaffolding", () => {
     for (const perm of ["fees.structure.read", "fees.structure.update", "fees.credit.read", "fees.import", "income.read", "income.create", "income.manage"]) {
       expect(can("operations_manager", perm)).toBe(false);
       expect(can("teacher", perm)).toBe(false);
+      expect(isGrantable("operations_manager", perm)).toBe(false);
+      expect(isGrantable("teacher", perm)).toBe(false);
     }
     expect(can("accountant", "fees.structure.read")).toBe(true);
     expect(can("accountant", "fees.structure.update")).toBe(false);

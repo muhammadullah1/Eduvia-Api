@@ -20,7 +20,7 @@ const ExcelJS = require("exceljs");
 const { Op, QueryTypes } = require("sequelize");
 const { FeeImportBatches, FeeImportRows, FeePayments, Students, Classes, StudentFeeMonths, Users, sequelize } = require("../models");
 const { USER_ROLES, STUDENT_STATUS } = require("../constants");
-const { can } = require("../constants/permissions");
+const { hasPermission } = require("./permission.service");
 const ApiError = require("../utils/ApiError");
 const auditService = require("./audit.service");
 const feeService = require("./fee.service");
@@ -54,7 +54,7 @@ const normKey = (v) => String(v ?? "").trim().toLowerCase();
 const text = (v) => (v instanceof Date ? v.toISOString() : String(v ?? "").trim());
 const squash = (v) => String(v ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
 const isAccountant = (actor) => actor.role === USER_ROLES.ACCOUNTANT;
-const seesTotals = (actor) => can(actor.role, "fees.totals");
+const seesTotals = (actor) => hasPermission(actor, "fees.totals");
 
 function ymd(d) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;

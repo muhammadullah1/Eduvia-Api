@@ -30,6 +30,7 @@ module.exports = (sequelize, DataTypes) => {
           "Admission",
           "Exam",
           "Annual",
+          "Promotion",
           "Transport",
           "Other"
         ),

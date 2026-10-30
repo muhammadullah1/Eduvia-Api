@@ -17,11 +17,19 @@ const bodies = {
     rankTie: Joi.string().valid("shared", "dense"),
   }).min(1),
   [SETTING_KEYS.FEES]: Joi.object({
-    defaultMonthlyFee: Joi.number().min(0),
     dueDay: Joi.number().integer().min(1).max(28),
     maxAdvanceMonths: Joi.number().integer().min(0).max(24),
-    concessionsEnabled: Joi.boolean(),
-  }).min(1),
+    concessionPolicy: Joi.object({
+      allowedModes: Joi.array()
+        .items(Joi.string().valid("percent", "fixed_discount", "waiver"))
+        .min(1),
+      approvalRule: Joi.string().valid("none", "always", "threshold"),
+      approvalPercentAbove: Joi.number().min(0).max(100).allow(null),
+      approvalAmountAbove: Joi.number().min(0).allow(null),
+    }),
+  })
+    .min(1)
+    .prefs({ stripUnknown: true }),
   [SETTING_KEYS.ADMISSION]: Joi.object({
     prefix: Joi.string().max(20),
     digits: Joi.number().integer().min(1).max(8),

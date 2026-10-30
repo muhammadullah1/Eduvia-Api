@@ -1,10 +1,16 @@
 "use strict";
 
-/** Finance reference lists (Step 2). Mirrored by the DB CHECK constraints in migrations 059-062. */
-exports.FEE_TYPES = ["Tuition", "Admission", "Exam", "Annual"];
+/** Finance reference lists (Step 2). Mirrored by the DB CHECK constraints in migrations 059+. */
+exports.FEE_TYPES = ["Tuition", "Admission", "Exam", "Annual", "Promotion"];
 exports.FEE_FREQUENCIES = ["Monthly", "OneTime", "Yearly"];
-/** Default frequency per fee type: tuition is monthly, the others are kept out of the monthly total. */
-exports.FEE_TYPE_FREQUENCY = { Tuition: "Monthly", Admission: "OneTime", Exam: "Yearly", Annual: "Yearly" };
+/** Default frequency per fee type: tuition is monthly; Admission/Promotion are one-time. */
+exports.FEE_TYPE_FREQUENCY = {
+  Tuition: "Monthly",
+  Admission: "OneTime",
+  Exam: "Yearly",
+  Annual: "Yearly",
+  Promotion: "OneTime",
+};
 exports.PAYMENT_METHODS = ["Cash", "BankTransfer", "Cheque", "Online"];
 exports.CREDIT_ENTRY_TYPES = ["Credit", "Applied", "Reversal"];
 exports.CREDIT_SOURCES = ["payment", "backfill", "import", "manual"];

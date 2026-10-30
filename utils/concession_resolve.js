@@ -1,8 +1,8 @@
 "use strict";
 
 /**
- * Deterministic concession resolution (RejectConflict).
- * Pure: no DB. Callers supply eligible Approved concessions for one fee type.
+ * Apply a single active concession to a fee base amount.
+ * No stacking / conflict — one Approved concession per student per fee type.
  */
 
 function round2(n) {
@@ -10,86 +10,65 @@ function round2(n) {
 }
 
 function applyMode(base, concession) {
+  const amount = round2(base);
+  if (!(amount > 0) || !concession) {
+    return { discount: 0, net: Math.max(0, amount) };
+  }
+
   const value = Number(concession.value) || 0;
   let discount = 0;
 
-  if (concession.mode === "fixed_payable") {
-    discount = Math.max(0, base - value);
-  } else if (concession.mode === "fixed_discount") {
-    discount = Math.min(base, value);
+  if (concession.mode === "fixed_discount") {
+    discount = Math.min(amount, value);
   } else if (concession.mode === "percent") {
-    discount = Math.min(base, (base * value) / 100);
+    discount = Math.min(amount, (amount * value) / 100);
   } else if (concession.mode === "waiver") {
-    discount = base;
+    discount = amount;
   } else {
     discount = 0;
   }
 
-  if (concession.maxDiscountAmount != null && concession.maxDiscountAmount !== "") {
-    discount = Math.min(discount, Number(concession.maxDiscountAmount));
-  }
-
-  discount = round2(Math.min(base, Math.max(0, discount)));
-  return { discount, net: round2(base - discount) };
+  discount = round2(Math.min(amount, Math.max(0, discount)));
+  return { discount, net: round2(amount - discount) };
 }
 
 /**
  * @param {number} base
- * @param {Array<object>} candidates Approved concessions targeting this fee type
- * @returns {{ conflict: boolean, eligibilityBlocked?: boolean, discount: number, net: number, applied: object[], conflictIds?: number[] }}
+ * @param {object|null} concession Single Approved concession or null
  */
-function resolveConcessions(base, candidates, options = {}) {
-  const eligibilityBlocked = Boolean(options.eligibilityBlocked);
-  const amount = round2(base);
-
-  if (eligibilityBlocked) {
-    return { conflict: false, eligibilityBlocked: true, discount: 0, net: amount, applied: [] };
-  }
-  if (!candidates || !candidates.length) {
-    return { conflict: false, discount: 0, net: amount, applied: [] };
-  }
-
-  const sorted = [...candidates].sort((a, b) => {
-    if (a.priority !== b.priority) return a.priority - b.priority;
-    return a.id - b.id;
-  });
-  const nonStackable = sorted.filter((c) => !c.stackable);
-  const stackable = sorted.filter((c) => c.stackable);
-
-  // RejectConflict: more than one non-stackable, or non-stackable mixed with any other.
-  const mixed = nonStackable.length === 1 && stackable.length > 0;
-  if (nonStackable.length > 1 || mixed) {
+function resolveConcession(base, concession) {
+  const amount = round2(Number(base) || 0);
+  if (!concession) {
     return {
-      conflict: true,
+      conflict: false,
       discount: 0,
       net: amount,
       applied: [],
-      conflictIds: sorted.map((c) => c.id),
     };
   }
-
-  let toApply = stackable;
-  if (nonStackable.length === 1) {
-    toApply = nonStackable;
-  }
-
-  let remaining = amount;
-  let totalDiscount = 0;
-  const applied = [];
-  for (const row of toApply) {
-    const step = applyMode(remaining, row);
-    if (step.discount <= 0) continue;
-    totalDiscount = round2(totalDiscount + step.discount);
-    remaining = step.net;
-    applied.push({
-      id: row.id,
-      mode: row.mode,
-      value: Number(row.value),
-      discount: step.discount,
-      category: row.category,
-    });
-  }
-  return { conflict: false, discount: totalDiscount, net: remaining, applied };
+  const step = applyMode(amount, concession);
+  return {
+    conflict: false,
+    discount: step.discount,
+    net: step.net,
+    applied: [
+      {
+        id: concession.id,
+        mode: concession.mode,
+        value: Number(concession.value),
+        discount: step.discount,
+        reasonId: concession.fkReasonId || concession.reasonId || null,
+        reasonLabel: concession.reasonLabel || concession.reason || null,
+      },
+    ],
+  };
 }
 
-module.exports = { resolveConcessions, applyMode, round2 };
+/** @deprecated Use resolveConcession — kept name for older call sites during cutover. */
+function resolveConcessions(base, candidates) {
+  const list = Array.isArray(candidates) ? candidates : [];
+  if (!list.length) return resolveConcession(base, null);
+  return resolveConcession(base, list[0]);
+}
+
+module.exports = { resolveConcession, resolveConcessions, applyMode, round2 };

@@ -321,7 +321,7 @@ async function history(schoolId, filters = {}) {
 /** Dues as a yes/no for roles without fee access (Ops); the amount only for fee roles. */
 async function outstandingView(actor, studentId) {
   const amount = await outstandingOf(studentId);
-  return { outstanding: seesFeeAmounts(actor.role) ? amount : null, hasOutstanding: amount > 0 };
+  return { outstanding: seesFeeAmounts(actor) ? amount : null, hasOutstanding: amount > 0 };
 }
 
 /** A student's full lifecycle, oldest first, with what they can change to next. */

@@ -43,10 +43,23 @@ async function hasLiveRow(classId, feeType, transaction) {
   return n > 0;
 }
 
+/** Live row with amount > 0. Amount 0 means "not configured" and stays bootstrap-editable. */
+async function hasConfiguredLiveRow(classId, feeType, transaction) {
+  const n = await FeeStructures.count({
+    where: {
+      fkClassId: classId,
+      feeType,
+      amount: { [Op.gt]: 0 },
+    },
+    transaction,
+  });
+  return n > 0;
+}
+
 async function assertWritable(session, classId, feeType, transaction) {
   if (!sessionLocked(session)) return { bootstrap: false };
-  const exists = await hasLiveRow(classId, feeType, transaction);
-  if (exists) {
+  const configured = await hasConfiguredLiveRow(classId, feeType, transaction);
+  if (configured) {
     throw new ApiError(409, "Fee structure for this session is locked and cannot be changed.", {
       code: "FEE_STRUCTURE_SESSION_LOCKED",
       feeType,
@@ -101,16 +114,21 @@ async function forClass(schoolId, classId, { asOf } = {}) {
   const day = asOf || (lockedNow ? today() : dayOf(session.startDate));
   const locked = sessionLocked(session, today());
   const current = await inForce(klass.id, day);
-  const liveTypes = new Set(
-    (await FeeStructures.findAll({ where: { fkClassId: klass.id }, attributes: ["feeType"] })).map((r) => r.feeType),
-  );
+  const configuredTypes = new Set();
+  const liveRows = await FeeStructures.findAll({
+    where: { fkClassId: klass.id },
+    attributes: ["feeType", "amount"],
+  });
+  for (const row of liveRows) {
+    if (Number(row.amount) > 0) configuredTypes.add(row.feeType);
+  }
   const upcomingRows = await FeeStructures.findAll({
     where: { fkClassId: klass.id, effectiveFrom: { [Op.gt]: day } },
     order: [["effectiveFrom", "ASC"]],
   });
   const fees = FEE_TYPES.filter((t) => current.has(t)).map((t) => plain(current.get(t)));
   const total = (list) => money(list.reduce((sum, f) => sum + f.amount, 0));
-  const bootstrapEligible = locked ? FEE_TYPES.filter((t) => !liveTypes.has(t)) : [];
+  const bootstrapEligible = locked ? FEE_TYPES.filter((t) => !configuredTypes.has(t)) : [];
   return {
     class: { id: klass.id, label: klass.label, sessionId: klass.fkSessionId, sessionName: session?.name ?? null },
     asOf: day,
@@ -176,6 +194,13 @@ async function add(actor, classId, { feeType, amount }) {
     if (!bootstrap && !sessionLocked(session)) {
       await archiveLive(klass.id, feeType, {
         reason: "Superseded before session start",
+        userId: actor.id,
+        transaction,
+      });
+    } else if (bootstrap) {
+      // Replace amount-0 / missing setup rows so initial lock-time setup can stick.
+      await archiveLive(klass.id, feeType, {
+        reason: "Initial setup after session start",
         userId: actor.id,
         transaction,
       });
@@ -259,17 +284,18 @@ async function recordClassFee(klass, { actor = null, isNew = false, transaction 
   if (current === amount || (current === null && amount <= 0)) return null;
 
   const locked = sessionLocked(session);
+  const configured = await hasConfiguredLiveRow(klass.id, "Tuition", transaction);
   const live = await hasLiveRow(klass.id, "Tuition", transaction);
 
-  if (locked && live) {
+  if (locked && configured) {
     throw new ApiError(409, "Fee structure for this session is locked and cannot be changed.", {
       code: "FEE_STRUCTURE_SESSION_LOCKED",
       feeType: "Tuition",
     });
   }
-  if (locked && !live && amount <= 0) return null;
+  if (locked && !configured && amount <= 0) return null;
 
-  if (!locked && live) {
+  if ((!locked && live) || (locked && live && !configured)) {
     await archiveLive(klass.id, "Tuition", {
       reason: isNew ? "Replaced from the class form" : "Superseded before session start",
       userId: actor?.id,

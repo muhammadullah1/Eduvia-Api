@@ -39,7 +39,7 @@ describe("Settings API integration", () => {
       expect(settings).toHaveProperty("attendance");
       expect(settings).toHaveProperty("admission");
 
-      expect(settings.fees.defaultMonthlyFee).toBeDefined();
+      expect(settings.fees.defaultMonthlyFee).toBeUndefined();
       expect(settings.fees.dueDay).toBeDefined();
       expect(settings.attendance.editWindowDays).toBeDefined();
       expect(settings.admission.prefix).toBeDefined();
@@ -65,14 +65,21 @@ describe("Settings API integration", () => {
   describe("Role-based write authorization", () => {
     it("allows Super Admin to update fees and resultVisibility", async () => {
       const feeRes = await call(tok.admin, "PUT", "/settings/fees", {
-        defaultMonthlyFee: 9000,
         dueDay: 15,
         maxAdvanceMonths: 6,
+        concessionPolicy: {
+          allowedModes: ["percent", "fixed_discount", "waiver"],
+          approvalRule: "always",
+          approvalPercentAbove: null,
+          approvalAmountAbove: null,
+        },
       });
       expect(feeRes.status).toBe(200);
-      expect(feeRes.body.data.defaultMonthlyFee).toBe(9000);
+      expect(feeRes.body.data.defaultMonthlyFee).toBeUndefined();
+      expect(feeRes.body.data.concessionsEnabled).toBeUndefined();
       expect(feeRes.body.data.dueDay).toBe(15);
       expect(feeRes.body.data.maxAdvanceMonths).toBe(6);
+      expect(feeRes.body.data.concessionPolicy.approvalRule).toBe("always");
 
       const resRes = await call(tok.admin, "PUT", "/settings/resultVisibility", {
         feeRule: "disabled",
@@ -85,7 +92,7 @@ describe("Settings API integration", () => {
 
     it("refuses Operations Manager from updating fees (403)", async () => {
       const res = await call(tok.ops, "PUT", "/settings/fees", {
-        defaultMonthlyFee: 5000,
+        dueDay: 12,
       });
       expect(res.status).toBe(403);
     });
@@ -160,15 +167,19 @@ describe("Settings API integration", () => {
   });
 
   describe("Validation constraints", () => {
-    it("rejects invalid fees values (dueDay > 28, negative fee, advance > 24)", async () => {
+    it("rejects invalid fees values (dueDay > 28, advance > 24) and strips school-wide tuition", async () => {
       const r1 = await call(tok.admin, "PUT", "/settings/fees", { dueDay: 29 });
       expect(r1.status).toBe(400);
 
       const r2 = await call(tok.admin, "PUT", "/settings/fees", { dueDay: 0 });
       expect(r2.status).toBe(400);
 
-      const r3 = await call(tok.admin, "PUT", "/settings/fees", { defaultMonthlyFee: -500 });
-      expect(r3.status).toBe(400);
+      const r3 = await call(tok.admin, "PUT", "/settings/fees", {
+        dueDay: 10,
+        defaultMonthlyFee: 9000,
+      });
+      expect(r3.status).toBe(200);
+      expect(r3.body.data.defaultMonthlyFee).toBeUndefined();
 
       const r4 = await call(tok.admin, "PUT", "/settings/fees", { maxAdvanceMonths: 25 });
       expect(r4.status).toBe(400);

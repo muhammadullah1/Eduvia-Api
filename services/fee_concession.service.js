@@ -3,23 +3,25 @@
 const { Op } = require("sequelize");
 const {
   StudentFeeConcessions,
-  StudentFeeConcessionFeeTypes,
   StudentFeeConcessionEvents,
+  SchoolConcessionReasons,
   Students,
-  Families,
-  FamilyMembers,
   AcademicSessions,
   Classes,
+  StudentParents,
   sequelize,
 } = require("../models");
 const ApiError = require("../utils/ApiError");
 const auditService = require("./audit.service");
-const feeTypePolicyService = require("./fee_type_policy.service");
-const { resolveConcessions } = require("../utils/concession_resolve");
+const accessService = require("./access.service");
+const settingsService = require("./settings.service");
+const { resolveConcession } = require("../utils/concession_resolve");
 const { FEE_TYPES } = require("../constants/finance");
-
-const MODES = ["fixed_payable", "fixed_discount", "percent", "waiver"];
-const CATEGORIES = ["Standard", "Scholarship", "Sibling", "Other"];
+const { SETTING_KEYS } = require("../constants");
+const {
+  CONCESSION_MODES,
+  DEFAULT_CONCESSION_POLICY,
+} = require("../constants/concessions");
 
 async function recordEvent(concessionId, eventType, fromStatus, toStatus, actor, payload, transaction) {
   let actorId = null;
@@ -38,30 +40,30 @@ async function recordEvent(concessionId, eventType, fromStatus, toStatus, actor,
 }
 
 function plain(row) {
-  let maxDiscountAmount = null;
-  if (row.maxDiscountAmount != null) {
-    maxDiscountAmount = Number(row.maxDiscountAmount);
-  }
-  const feeTypeRows = row.feeTypes || [];
+  let reasonLabel = null;
+  if (row.reasonRow && row.reasonRow.label) reasonLabel = row.reasonRow.label;
+  else if (row.reason) reasonLabel = row.reason;
+
   return {
     id: row.id,
     schoolId: row.fkSchoolId,
     sessionId: row.fkSessionId,
     studentId: row.fkStudentId,
-    familyId: row.fkFamilyId,
-    category: row.category,
+    reasonId: row.fkReasonId,
+    reasonLabel,
+    replacesId: row.fkReplacesId,
+    feeType: row.feeType || "Tuition",
+    feeTypes: [row.feeType || "Tuition"],
     mode: row.mode,
     value: Number(row.value),
-    priority: row.priority,
-    stackable: row.stackable,
-    maxDiscountAmount,
     effectiveFrom: row.effectiveFrom,
     effectiveTo: row.effectiveTo,
     status: row.status,
-    reason: row.reason,
     notes: row.notes,
-    feeTypes: feeTypeRows.map((t) => t.feeType),
+    rejectionReason: row.rejectionReason,
     approvedAt: row.approvedAt,
+    requestedByUserId: row.fkRequestedByUserId,
+    approvedByUserId: row.fkApprovedByUserId,
   };
 }
 
@@ -72,10 +74,34 @@ function studentDisplayName(student) {
   return `${first} ${last}`.trim();
 }
 
+async function policyFor(schoolId, transaction) {
+  const fees = await settingsService.get(schoolId, SETTING_KEYS.FEES, { transaction });
+  if (fees.concessionPolicy && typeof fees.concessionPolicy === "object") {
+    return { ...DEFAULT_CONCESSION_POLICY, ...fees.concessionPolicy };
+  }
+  return { ...DEFAULT_CONCESSION_POLICY };
+}
+
+function needsApproval(policy, mode, value) {
+  const rule = policy.approvalRule || "none";
+  if (rule === "always") return true;
+  if (rule === "none") return false;
+  if (mode === "waiver") return true;
+  if (mode === "percent") {
+    if (policy.approvalPercentAbove == null) return false;
+    return Number(value) > Number(policy.approvalPercentAbove);
+  }
+  if (mode === "fixed_discount") {
+    if (policy.approvalAmountAbove == null) return false;
+    return Number(value) > Number(policy.approvalAmountAbove);
+  }
+  return false;
+}
+
 async function load(schoolId, id, transaction) {
   const row = await StudentFeeConcessions.findOne({
     where: { id, fkSchoolId: schoolId },
-    include: [{ model: StudentFeeConcessionFeeTypes, as: "feeTypes" }],
+    include: [{ model: SchoolConcessionReasons, as: "reasonRow" }],
     transaction,
   });
   if (!row) throw new ApiError(404, "Concession not found");
@@ -83,128 +109,174 @@ async function load(schoolId, id, transaction) {
 }
 
 async function assertStudent(schoolId, studentId, transaction) {
-  const student = await Students.findOne({ where: { id: studentId, fkSchoolId: schoolId }, transaction });
+  const student = await Students.findOne({
+    where: { id: studentId, fkSchoolId: schoolId },
+    transaction,
+  });
   if (!student) throw new ApiError(404, "Student not found");
   return student;
 }
 
-async function assertFamilyBeneficiary(schoolId, familyId, studentId, transaction) {
-  const family = await Families.findOne({ where: { id: familyId, fkSchoolId: schoolId }, transaction });
-  if (!family) throw new ApiError(404, "Family not found");
-  if (!family.verifiedAt) {
-    throw new ApiError(400, "Family must be verified before sibling concessions can be approved", {
-      code: "FAMILY_NOT_VERIFIED",
-    });
-  }
-  const member = await FamilyMembers.findOne({
-    where: { fkFamilyId: familyId, fkStudentId: studentId, status: "Active" },
-    transaction,
-  });
-  if (!member) throw new ApiError(400, "Student is not an active member of this family");
-  return family;
-}
-
-async function create(actor, body) {
-  return sequelize.transaction(async (transaction) => {
-    const student = await assertStudent(actor.schoolId, body.studentId, transaction);
-    if (!MODES.includes(body.mode)) throw new ApiError(400, "Invalid concession mode");
-
-    let category = "Standard";
-    if (body.category) category = body.category;
-    if (!CATEGORIES.includes(category)) throw new ApiError(400, "Invalid category");
-
-    const feeTypes = [...new Set(body.feeTypes || [])];
-    if (!feeTypes.length || feeTypes.some((t) => !FEE_TYPES.includes(t))) {
-      throw new ApiError(400, "Select at least one valid fee type");
-    }
-    if (body.mode === "percent" && (body.value < 0 || body.value > 100)) {
-      throw new ApiError(400, "Percent must be between 0 and 100");
-    }
+async function sessionForStudent(schoolId, student, bodySessionId, transaction) {
+  if (bodySessionId) {
     const session = await AcademicSessions.findOne({
-      where: { id: body.sessionId, fkSchoolId: actor.schoolId },
+      where: { id: bodySessionId, fkSchoolId: schoolId },
       transaction,
     });
     if (!session) throw new ApiError(404, "Session not found");
+    return session;
+  }
+  if (student.fkClassId) {
+    const klass = await Classes.findByPk(student.fkClassId, {
+      attributes: ["fkSessionId"],
+      transaction,
+    });
+    if (klass) {
+      const session = await AcademicSessions.findByPk(klass.fkSessionId, { transaction });
+      if (session) return session;
+    }
+  }
+  const current = await AcademicSessions.findOne({
+    where: { fkSchoolId: schoolId, isCurrent: true },
+    transaction,
+  });
+  if (!current) throw new ApiError(400, "No academic session available for this concession");
+  return current;
+}
 
-    if (body.familyId || category === "Sibling") {
-      if (!body.familyId) throw new ApiError(400, "Sibling concessions require a familyId");
-      const member = await FamilyMembers.findOne({
-        where: { fkFamilyId: body.familyId, fkStudentId: student.id, status: "Active" },
-        transaction,
-      });
-      if (!member) throw new ApiError(400, "Student is not an active member of this family");
-      const family = await Families.findOne({
-        where: { id: body.familyId, fkSchoolId: actor.schoolId },
-        transaction,
-      });
-      if (!family) throw new ApiError(404, "Family not found");
+/**
+ * Upsert-style assign: creates Approved or PendingApproval; supersedes any
+ * previous Approved row for the same student + fee type.
+ */
+async function assign(actor, body) {
+  return sequelize.transaction(async (transaction) => {
+    const student = await assertStudent(actor.schoolId, body.studentId, transaction);
+    const policy = await policyFor(actor.schoolId, transaction);
+
+    const mode = body.mode;
+    if (!CONCESSION_MODES.includes(mode)) throw new ApiError(400, "Invalid concession type");
+    if (!(policy.allowedModes || []).includes(mode)) {
+      throw new ApiError(400, "This concession type is not allowed by school policy");
     }
 
-    let value = body.value;
-    if (body.mode === "waiver") value = 100;
+    let feeType = "Tuition";
+    if (body.feeType) feeType = body.feeType;
+    if (!FEE_TYPES.includes(feeType)) throw new ApiError(400, "Invalid fee type");
 
-    let priority = 100;
-    if (body.priority != null) priority = body.priority;
+    let value = Number(body.value) || 0;
+    if (mode === "waiver") value = 0;
+    if (mode === "percent" && (value < 0 || value > 100)) {
+      throw new ApiError(400, "Percent must be between 0 and 100");
+    }
+    if (mode === "fixed_discount" && value < 0) {
+      throw new ApiError(400, "Discount amount must be 0 or more");
+    }
 
-    let maxDiscountAmount = null;
-    if (body.maxDiscountAmount != null) maxDiscountAmount = body.maxDiscountAmount;
+    let reasonId = null;
+    let reasonLabel = null;
+    if (body.reasonId) {
+      const reason = await SchoolConcessionReasons.findOne({
+        where: {
+          id: body.reasonId,
+          fkSchoolId: actor.schoolId,
+          active: true,
+        },
+        transaction,
+      });
+      if (!reason) throw new ApiError(404, "Concession reason not found");
+      reasonId = reason.id;
+      reasonLabel = reason.label;
+    } else if (body.reasonLabel) {
+      reasonLabel = String(body.reasonLabel).trim();
+    }
+    if (!reasonLabel) throw new ApiError(400, "Pick a concession reason");
 
-    let familyId = null;
-    if (body.familyId) familyId = body.familyId;
+    const session = await sessionForStudent(
+      actor.schoolId,
+      student,
+      body.sessionId,
+      transaction,
+    );
 
+    let effectiveFrom = body.effectiveFrom;
+    if (!effectiveFrom) effectiveFrom = session.startDate;
     let effectiveTo = null;
     if (body.effectiveTo) effectiveTo = body.effectiveTo;
 
-    let reason = null;
-    if (body.reason) reason = body.reason;
-
     let notes = null;
     if (body.notes) notes = body.notes;
+
+    const pending = needsApproval(policy, mode, value);
+    const status = pending ? "PendingApproval" : "Approved";
+
+    const previous = await StudentFeeConcessions.findOne({
+      where: {
+        fkSchoolId: actor.schoolId,
+        fkStudentId: student.id,
+        feeType,
+        status: "Approved",
+      },
+      transaction,
+      lock: transaction.LOCK.UPDATE,
+    });
+
+    let replacesId = null;
+    if (previous && !pending) {
+      replacesId = previous.id;
+      await previous.update({ status: "Superseded" }, { transaction });
+      await recordEvent(
+        previous.id,
+        "Superseded",
+        "Approved",
+        "Superseded",
+        actor,
+        { by: "new_version" },
+        transaction,
+      );
+    }
 
     const row = await StudentFeeConcessions.create(
       {
         fkSchoolId: actor.schoolId,
         fkSessionId: session.id,
         fkStudentId: student.id,
-        fkFamilyId: familyId,
-        category,
-        mode: body.mode,
+        fkReasonId: reasonId,
+        fkReplacesId: replacesId,
+        feeType,
+        category: "Standard",
+        mode,
         value,
-        priority,
-        stackable: Boolean(body.stackable),
-        maxDiscountAmount,
-        effectiveFrom: body.effectiveFrom,
+        priority: 100,
+        stackable: false,
+        effectiveFrom,
         effectiveTo,
-        status: "Draft",
-        reason,
+        status,
+        reason: reasonLabel,
         notes,
         fkRequestedByUserId: actor.id,
+        fkApprovedByUserId: pending ? null : actor.id,
+        approvedAt: pending ? null : new Date(),
       },
       { transaction },
     );
-    await StudentFeeConcessionFeeTypes.bulkCreate(
-      feeTypes.map((feeType) => ({ fkConcessionId: row.id, feeType })),
-      { transaction },
-    );
-    await recordEvent(row.id, "Created", null, "Draft", actor, { feeTypes }, transaction);
+
+    await recordEvent(row.id, "Created", null, status, actor, { feeType, mode, value }, transaction);
+    if (!pending) {
+      await auditService.record(
+        actor,
+        `set ${feeType} concession for student ${student.id} (${mode})`,
+        { entityType: "fee_concession", entityId: row.id },
+        { transaction },
+      );
+    }
+
     return plain(await load(actor.schoolId, row.id, transaction));
   });
 }
 
-async function submit(actor, id) {
-  return sequelize.transaction(async (transaction) => {
-    const row = await load(actor.schoolId, id, transaction);
-    if (!["Draft", "Rejected"].includes(row.status)) {
-      throw new ApiError(400, "Only draft or rejected concessions can be submitted");
-    }
-    if (!row.reason || String(row.reason).trim().length < 5) {
-      throw new ApiError(400, "A reason is required before submit");
-    }
-    const from = row.status;
-    await row.update({ status: "PendingApproval", fkRequestedByUserId: actor.id }, { transaction });
-    await recordEvent(row.id, "Submitted", from, "PendingApproval", actor, null, transaction);
-    return plain(await load(actor.schoolId, id, transaction));
-  });
+/** @deprecated Prefer assign — kept for older clients that POSTed drafts. */
+async function create(actor, body) {
+  return assign(actor, body);
 }
 
 async function approve(actor, id) {
@@ -213,9 +285,32 @@ async function approve(actor, id) {
     if (row.status !== "PendingApproval") {
       throw new ApiError(400, "Only pending concessions can be approved");
     }
-    if (row.fkFamilyId) {
-      await assertFamilyBeneficiary(actor.schoolId, row.fkFamilyId, row.fkStudentId, transaction);
+
+    const previous = await StudentFeeConcessions.findOne({
+      where: {
+        fkSchoolId: actor.schoolId,
+        fkStudentId: row.fkStudentId,
+        feeType: row.feeType,
+        status: "Approved",
+        id: { [Op.ne]: row.id },
+      },
+      transaction,
+      lock: transaction.LOCK.UPDATE,
+    });
+    if (previous) {
+      await previous.update({ status: "Superseded" }, { transaction });
+      await recordEvent(
+        previous.id,
+        "Superseded",
+        "Approved",
+        "Superseded",
+        actor,
+        { by: "approval" },
+        transaction,
+      );
+      await row.update({ fkReplacesId: previous.id }, { transaction });
     }
+
     const from = row.status;
     await row.update(
       {
@@ -275,26 +370,42 @@ async function revoke(actor, id, reason) {
   });
 }
 
-async function listForStudent(schoolId, studentId) {
-  await assertStudent(schoolId, studentId);
+async function listForStudent(user, studentId) {
+  await accessService.assertStudentAccess(user, studentId);
   const rows = await StudentFeeConcessions.findAll({
-    where: { fkSchoolId: schoolId, fkStudentId: studentId },
-    include: [{ model: StudentFeeConcessionFeeTypes, as: "feeTypes" }],
+    where: { fkSchoolId: user.schoolId, fkStudentId: studentId },
+    include: [{ model: SchoolConcessionReasons, as: "reasonRow" }],
     order: [["id", "DESC"]],
   });
   return rows.map(plain);
 }
 
-async function list(schoolId, { status, sessionId, studentId } = {}) {
-  const where = { fkSchoolId: schoolId };
+async function list(user, { status, sessionId, studentId } = {}) {
+  const where = { fkSchoolId: user.schoolId };
   if (status) where.status = status;
   if (sessionId) where.fkSessionId = sessionId;
   if (studentId) where.fkStudentId = studentId;
+
+  const scope = await accessService.studentScope(user);
+  if (scope) {
+    if (!scope.length) return [];
+    if (studentId) {
+      const allowed = scope.includes(Number(studentId));
+      if (!allowed) throw new ApiError(403, "This student is not linked to your account.");
+    } else {
+      where.fkStudentId = { [Op.in]: scope };
+    }
+  }
+
   const rows = await StudentFeeConcessions.findAll({
     where,
     include: [
-      { model: StudentFeeConcessionFeeTypes, as: "feeTypes" },
-      { model: Students, as: "student", attributes: ["id", "firstName", "lastName", "admissionNo"] },
+      { model: SchoolConcessionReasons, as: "reasonRow" },
+      {
+        model: Students,
+        as: "student",
+        attributes: ["id", "firstName", "lastName", "admissionNo"],
+      },
     ],
     order: [["id", "DESC"]],
     limit: 200,
@@ -312,86 +423,121 @@ async function list(schoolId, { status, sessionId, studentId } = {}) {
   });
 }
 
-/**
- * Resolve concessions for a bill about to be created.
- * Returns { conflict, discount, net, snapshot } — conflict is data, not an exception.
- */
 async function resolveForBill(schoolId, student, feeType, base, onDate, { transaction } = {}) {
-  const eligible = await feeTypePolicyService.isEligible(schoolId, feeType, { transaction });
-  if (!eligible) {
-    const resolved = resolveConcessions(base, [], { eligibilityBlocked: true });
+  const amount = Number(base);
+  if (!(amount > 0)) {
     return {
-      ...resolved,
-      snapshot: { conflict: false, eligibilityBlocked: true, applied: [], feeType, base },
+      conflict: false,
+      discount: 0,
+      net: 0,
+      snapshot: {
+        conflict: false,
+        applied: [],
+        feeType,
+        base: amount > 0 ? amount : null,
+      },
     };
   }
 
-  let sessionId = null;
-  if (student.fkClassId) {
-    const klass = await Classes.findByPk(student.fkClassId, {
-      attributes: ["fkSessionId"],
-      transaction,
-    });
-    if (klass && klass.fkSessionId != null) {
-      sessionId = klass.fkSessionId;
-    }
-  }
-  if (!sessionId) {
-    const session = await AcademicSessions.findOne({
-      where: {
-        fkSchoolId: schoolId,
-        startDate: { [Op.lte]: onDate },
-        endDate: { [Op.gte]: onDate },
-      },
-      order: [["startDate", "DESC"]],
-      transaction,
-    });
-    if (session) sessionId = session.id;
-  }
-
-  const where = {
-    fkSchoolId: schoolId,
-    fkStudentId: student.id,
-    status: "Approved",
-    effectiveFrom: { [Op.lte]: onDate },
-    [Op.or]: [{ effectiveTo: null }, { effectiveTo: { [Op.gte]: onDate } }],
-  };
-  if (sessionId) where.fkSessionId = sessionId;
-
-  const rows = await StudentFeeConcessions.findAll({
-    where,
-    include: [
-      {
-        model: StudentFeeConcessionFeeTypes,
-        as: "feeTypes",
-        where: { feeType },
-        required: true,
-      },
-    ],
+  const row = await StudentFeeConcessions.findOne({
+    where: {
+      fkSchoolId: schoolId,
+      fkStudentId: student.id,
+      feeType,
+      status: "Approved",
+      effectiveFrom: { [Op.lte]: onDate },
+      [Op.or]: [{ effectiveTo: null }, { effectiveTo: { [Op.gte]: onDate } }],
+    },
+    include: [{ model: SchoolConcessionReasons, as: "reasonRow" }],
+    order: [["id", "DESC"]],
     transaction,
   });
 
-  const resolved = resolveConcessions(base, rows);
-  let conflictIds = [];
-  if (resolved.conflictIds) conflictIds = resolved.conflictIds;
+  let concession = null;
+  if (row) {
+    concession = {
+      id: row.id,
+      mode: row.mode,
+      value: Number(row.value),
+      fkReasonId: row.fkReasonId,
+      reasonLabel: row.reasonRow ? row.reasonRow.label : row.reason,
+      reason: row.reason,
+    };
+  }
+
+  const resolved = resolveConcession(amount, concession);
   return {
     ...resolved,
     snapshot: {
-      conflict: resolved.conflict,
-      eligibilityBlocked: false,
+      conflict: false,
       applied: resolved.applied,
-      conflictIds,
       feeType,
-      base,
+      base: amount,
+      reasonLabel: concession ? concession.reasonLabel : null,
+      mode: concession ? concession.mode : null,
+      value: concession ? concession.value : null,
+      net: resolved.net,
+      discount: resolved.discount,
     },
   };
 }
 
-async function get(schoolId, id) {
-  return plain(await load(schoolId, id));
+async function get(user, id) {
+  const row = await load(user.schoolId, id);
+  await accessService.assertStudentAccess(user, row.fkStudentId);
+  return plain(row);
+}
+
+/** Suggest Sibling reason when another student in the same school shares a parent. */
+async function siblingSuggestion(user, studentId) {
+  await accessService.assertStudentAccess(user, studentId);
+  const links = await StudentParents.findAll({
+    where: { fkStudentId: studentId },
+    attributes: ["fkParentId"],
+  });
+  if (!links.length) return { suggestSibling: false, siblingStudentIds: [] };
+
+  const parentIds = links.map((l) => l.fkParentId);
+  const peers = await StudentParents.findAll({
+    where: {
+      fkParentId: { [Op.in]: parentIds },
+      fkStudentId: { [Op.ne]: studentId },
+    },
+    include: [
+      {
+        model: Students,
+        as: "student",
+        where: { fkSchoolId: user.schoolId },
+        attributes: ["id", "firstName", "lastName", "admissionNo"],
+        required: true,
+      },
+    ],
+  });
+
+  const seen = new Set();
+  const siblings = [];
+  for (const peer of peers) {
+    if (!peer.student || seen.has(peer.student.id)) continue;
+    seen.add(peer.student.id);
+    siblings.push({
+      id: peer.student.id,
+      name: studentDisplayName(peer.student),
+      admissionNo: peer.student.admissionNo,
+    });
+  }
+  return {
+    suggestSibling: siblings.length > 0,
+    siblingStudentIds: siblings.map((s) => s.id),
+    siblings,
+  };
+}
+
+async function submit() {
+  throw new ApiError(410, "Submit is no longer used — assign creates Approved or PendingApproval directly");
 }
 
 module.exports = {
+  assign,
   create,
   submit,
   approve,
@@ -401,5 +547,8 @@ module.exports = {
   listForStudent,
   get,
   resolveForBill,
+  siblingSuggestion,
   plain,
+  needsApproval,
+  policyFor,
 };

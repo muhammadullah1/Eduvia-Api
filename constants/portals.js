@@ -9,14 +9,14 @@ const PORTAL_BY_ROLE = {
     defaultSection: "dashboard",
   },
   [USER_ROLES.OPERATIONS_MANAGER]: {
-    slug: "operations",
+    slug: "admin",
     label: "Operations Portal",
     defaultSection: "overview",
   },
   [USER_ROLES.ACCOUNTANT]: {
-    slug: "accountant",
+    slug: "admin",
     label: "Accountant Portal",
-    defaultSection: "collect",
+    defaultSection: "collect-fee",
   },
   [USER_ROLES.TEACHER]: {
     slug: "teacher",

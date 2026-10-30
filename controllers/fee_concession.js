@@ -3,24 +3,30 @@
 const feeConcessionService = require("../services/fee_concession.service");
 const feeStructureService = require("../services/fee_structure.service");
 const feeService = require("../services/fee.service");
-const { Students } = require("../models");
+const accessService = require("../services/access.service");
 const { handle } = require("../utils/handler");
-const ApiError = require("../utils/ApiError");
 
 module.exports = {
-  create: handle("Concession draft created", (req) => feeConcessionService.create(req.user, req.body), 201),
-  list: handle("Fee concessions", (req) => feeConcessionService.list(req.user.schoolId, req.query)),
-  get: handle("Concession", (req) => feeConcessionService.get(req.user.schoolId, req.params.id)),
-  listForStudent: handle("Student concessions", (req) => feeConcessionService.listForStudent(req.user.schoolId, req.params.studentId)),
-  submit: handle("Concession submitted", (req) => feeConcessionService.submit(req.user, req.params.id)),
-  approve: handle("Concession approved", (req) => feeConcessionService.approve(req.user, req.params.id)),
-  reject: handle("Concession rejected", (req) => feeConcessionService.reject(req.user, req.params.id, req.body.reason)),
-  revoke: handle("Concession revoked", (req) => feeConcessionService.revoke(req.user, req.params.id, req.body.reason)),
+  create: handle("Concession saved", async (req) => feeConcessionService.assign(req.user, req.body), 201),
+  list: handle("Fee concessions", async (req) => feeConcessionService.list(req.user, req.query)),
+  get: handle("Concession", async (req) => feeConcessionService.get(req.user, req.params.id)),
+  listForStudent: handle("Student concessions", async (req) =>
+    feeConcessionService.listForStudent(req.user, req.params.studentId),
+  ),
+  siblingSuggestion: handle("Sibling suggestion", async (req) =>
+    feeConcessionService.siblingSuggestion(req.user, req.params.studentId),
+  ),
+  approve: handle("Concession approved", async (req) =>
+    feeConcessionService.approve(req.user, req.params.id),
+  ),
+  reject: handle("Concession rejected", async (req) =>
+    feeConcessionService.reject(req.user, req.params.id, req.body.reason),
+  ),
+  revoke: handle("Concession revoked", async (req) =>
+    feeConcessionService.revoke(req.user, req.params.id, req.body.reason),
+  ),
   breakdown: handle("Fee breakdown", async (req) => {
-    const student = await Students.findOne({
-      where: { id: req.params.studentId, fkSchoolId: req.user.schoolId },
-    });
-    if (!student) throw new ApiError(404, "Student not found");
+    const student = await accessService.assertStudentAccess(req.user, req.params.studentId);
     const month = req.query.month;
     const feeType = req.query.feeType || "Tuition";
     let base;
@@ -31,23 +37,24 @@ module.exports = {
       const map = student.fkClassId
         ? await feeStructureService.inForce(student.fkClassId, onDay, { feeType })
         : new Map();
-      base = map.get(feeType) ? Number(map.get(feeType).amount) : 0;
+      const row = map.get(feeType);
+      base = row && Number(row.amount) > 0 ? Number(row.amount) : null;
     }
     const resolved = await feeConcessionService.resolveForBill(
       req.user.schoolId,
       student,
       feeType,
-      base,
+      base == null ? 0 : base,
       `${month}-01`,
     );
     return {
       studentId: student.id,
       month,
       feeType,
-      base,
+      base: base == null ? null : Number(base),
       discount: resolved.discount,
-      net: resolved.net,
-      conflict: resolved.conflict,
+      net: base == null ? null : resolved.net,
+      conflict: false,
       snapshot: resolved.snapshot,
     };
   }),

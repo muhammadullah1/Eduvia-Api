@@ -30,7 +30,7 @@ const auditService = require("./audit.service");
 const storageService = require("./storage.service");
 const accessService = require("./access.service");
 const { admissionDocumentKeyPattern } = require("./upload_policy.service");
-const { can } = require("../constants/permissions");
+const { hasPermission } = require("./permission.service");
 const {
   isValidPhonePk,
   normalizePhonePk,
@@ -346,7 +346,7 @@ async function documentDownloadUrl(user, id, documentId) {
     if (!app.enrolledStudentId || !children.includes(app.enrolledStudentId)) {
       throw new ApiError(403, "This document is not linked to your account.");
     }
-  } else if (!can(user.role, "admissions.manage")) {
+  } else if (!hasPermission(user, "admissions.manage")) {
     throw new ApiError(403, "Access Denied. You don't have permission.");
   }
   const doc = await ApplicationDocuments.findOne({ where: { id: documentId, fkApplicationId: app.id } });

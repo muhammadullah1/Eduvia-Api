@@ -61,7 +61,9 @@ describe("fee structure session lock", () => {
     const res = await call(tok, "GET", `/fee-structures/classes/${lockedClass.id}`);
     expect(res.status).toBe(200);
     expect(res.body.data.sessionLocked).toBe(true);
-    expect(res.body.data.bootstrapEligible).toEqual(expect.arrayContaining(["Admission", "Exam", "Annual"]));
+    expect(res.body.data.bootstrapEligible).toEqual(
+      expect.arrayContaining(["Admission", "Exam", "Annual", "Promotion"]),
+    );
     expect(res.body.data.bootstrapEligible).not.toContain("Tuition");
   });
 
@@ -69,6 +71,40 @@ describe("fee structure session lock", () => {
     const res = await call(tok, "POST", `/fee-structures/classes/${lockedClass.id}`, { feeType: "Tuition", amount: 9999 });
     expect(res.status).toBe(409);
     expect(res.body.data?.code || res.body?.code || JSON.stringify(res.body)).toMatch(/FEE_STRUCTURE_SESSION_LOCKED|locked/i);
+  });
+
+  test("Tuition amount 0 remains bootstrap-editable after lock, then locks", async () => {
+    const zeroClass = await classService.create(school.id, {
+      fkSessionId: lockedSession.id,
+      grade: "Zero",
+      section: "A",
+      label: "Zero A",
+      monthlyTuitionFee: 0,
+      capacity: 30,
+    });
+    await FeeStructures.create({
+      fkSchoolId: school.id,
+      fkSessionId: lockedSession.id,
+      fkClassId: zeroClass.id,
+      feeType: "Tuition",
+      frequency: "Monthly",
+      amount: 0,
+      effectiveFrom: "2026-04-01",
+    });
+    const get = await call(tok, "GET", `/fee-structures/classes/${zeroClass.id}`);
+    expect(get.status).toBe(200);
+    expect(get.body.data.bootstrapEligible).toContain("Tuition");
+    const first = await call(tok, "POST", `/fee-structures/classes/${zeroClass.id}`, {
+      feeType: "Tuition",
+      amount: 1500,
+    });
+    expect(first.status).toBe(201);
+    expect(first.body.data.amount).toBe(1500);
+    const second = await call(tok, "POST", `/fee-structures/classes/${zeroClass.id}`, {
+      feeType: "Tuition",
+      amount: 1600,
+    });
+    expect(second.status).toBe(409);
   });
 
   test("bootstrap allows one initial Exam on a locked session, then locks it", async () => {

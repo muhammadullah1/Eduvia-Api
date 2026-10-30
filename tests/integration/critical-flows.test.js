@@ -20,6 +20,7 @@ const {
   DailyLessons,
   MarkSheets,
   StudentFeeMonths,
+  FeeStructures,
 } = require("../../models");
 const applicationService = require("../../services/application.service");
 const attendanceService = require("../../services/attendance.service");
@@ -147,6 +148,15 @@ async function buildSchool() {
     label: "Class 5-A",
     monthlyTuitionFee: 1000,
     capacity: 30,
+  });
+  await FeeStructures.create({
+    fkSchoolId: school.id,
+    fkSessionId: session.id,
+    fkClassId: klass.id,
+    feeType: "Tuition",
+    frequency: "Monthly",
+    amount: 1000,
+    effectiveFrom: "2026-04-01",
   });
   await TimetableSlots.create({
     fkSchoolId: school.id,

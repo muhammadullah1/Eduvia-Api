@@ -47,6 +47,7 @@ router.use("/expenses", expenseRouter);
 router.use("/finance", require("./finance"));
 router.use("/fee-structures", feeStructureRouter);
 router.use("/fee-concessions", require("./fee_concession"));
+router.use("/concession-reasons", require("./concession_reason"));
 router.use("/families", require("./family"));
 router.use("/updates", noticeRouter);
 router.use("/system-notices", require("./system_notice"));
@@ -62,5 +63,6 @@ router.use("/settings", settingsRouter);
 router.use("/audit-logs", auditRouter);
 router.use("/leave-requests", leaveRouter);
 router.use("/reports", reportRouter);
+router.use("/roles", require("./role"));
 
 module.exports = router;

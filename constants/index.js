@@ -179,12 +179,16 @@ exports.SETTING_DEFAULTS = {
     rankTie: "shared",
   },
   fees: {
-    defaultMonthlyFee: 8500,
     dueDay: 10,
     maxAdvanceMonths: 12,
-    // When true, tuition uses Approved concessions instead of students.fixed_monthly_fee.
-    // discount_percent is never applied (explicit product hold).
-    concessionsEnabled: false,
+    // There is no school-wide defaultMonthlyFee — amounts come from Fee Structure only.
+    // Concessions are always applied from the student's Approved row (see concessionPolicy).
+    concessionPolicy: {
+      allowedModes: ["percent", "fixed_discount", "waiver"],
+      approvalRule: "none",
+      approvalPercentAbove: null,
+      approvalAmountAbove: null,
+    },
   },
   admission: {
     prefix: "CLS",

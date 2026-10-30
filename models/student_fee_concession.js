@@ -1,5 +1,8 @@
 "use strict";
 
+const { CONCESSION_MODES, CONCESSION_STATUSES } = require("../constants/concessions");
+const { FEE_TYPES } = require("../constants/finance");
+
 module.exports = (sequelize, DataTypes) => {
   const StudentFeeConcession = sequelize.define(
     "student_fee_concessions",
@@ -42,19 +45,41 @@ module.exports = (sequelize, DataTypes) => {
           isInt: true,
         },
       },
+      fkReasonId: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+        field: "fk_reason_id",
+        validate: {
+          isInt: true,
+        },
+      },
+      fkReplacesId: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+        field: "fk_replaces_id",
+        validate: {
+          isInt: true,
+        },
+      },
+      feeType: {
+        type: DataTypes.STRING(20),
+        allowNull: false,
+        defaultValue: "Tuition",
+        field: "fee_type",
+        validate: {
+          isIn: [FEE_TYPES],
+        },
+      },
       category: {
         type: DataTypes.STRING(30),
         allowNull: false,
         defaultValue: "Standard",
-        validate: {
-          isIn: [["Standard", "Scholarship", "Sibling", "Other"]],
-        },
       },
       mode: {
         type: DataTypes.STRING(30),
         allowNull: false,
         validate: {
-          isIn: [["fixed_payable", "fixed_discount", "percent", "waiver"]],
+          isIn: [CONCESSION_MODES],
         },
       },
       value: {
@@ -96,9 +121,9 @@ module.exports = (sequelize, DataTypes) => {
       status: {
         type: DataTypes.STRING(30),
         allowNull: false,
-        defaultValue: "Draft",
+        defaultValue: "PendingApproval",
         validate: {
-          isIn: [["Draft", "PendingApproval", "Approved", "Rejected", "Revoked"]],
+          isIn: [CONCESSION_STATUSES],
         },
       },
       reason: {
@@ -163,6 +188,14 @@ module.exports = (sequelize, DataTypes) => {
     StudentFeeConcession.belongsTo(models.Families, {
       foreignKey: "fkFamilyId",
       as: "family",
+    });
+    StudentFeeConcession.belongsTo(models.SchoolConcessionReasons, {
+      foreignKey: "fkReasonId",
+      as: "reasonRow",
+    });
+    StudentFeeConcession.belongsTo(models.StudentFeeConcessions, {
+      foreignKey: "fkReplacesId",
+      as: "replaces",
     });
     StudentFeeConcession.hasMany(models.StudentFeeConcessionFeeTypes, {
       foreignKey: "fkConcessionId",

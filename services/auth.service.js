@@ -10,6 +10,7 @@ const { USER_STATUS } = require("../constants");
 const { assertPortalRole, getPortalForRole } = require("../constants/portals");
 const ApiError = require("../utils/ApiError");
 const refreshTokens = require("./refresh_token.service");
+const permissionService = require("./permission.service");
 
 function getResetSecret(user) {
   return `${config.get("signInJwtSecret")}_reset_${user.password || "initial"}`;
@@ -24,6 +25,26 @@ async function findUserForAuth(userId) {
     attributes: ["id", "fkSchoolId", "role", "status"],
     raw: true,
   });
+}
+
+const PRIVATE_USER_FIELDS = ["password", "created_at", "updated_at", "archived_at", "archivedBy"];
+
+function publicUser(user) {
+  const json = user.toJSON();
+  PRIVATE_USER_FIELDS.forEach((field) => delete json[field]);
+  return json;
+}
+
+async function effectivePermissionList(user) {
+  const held = await permissionService.permissionsFor(user.fkSchoolId, user.role);
+  return [...held].sort();
+}
+
+/** The signed-in user, their portal and effective permissions (`GET /auth/me`). */
+async function session(userId) {
+  const user = await userService.findById(userId);
+  if (!user) throw new ApiError(401, "Unauthorized. User not found.");
+  return { user: publicUser(user), portal: getPortalForRole(user.role), permissions: await effectivePermissionList(user) };
 }
 
 async function signIn(email, password, schoolId) {
@@ -56,17 +77,16 @@ async function signIn(email, password, schoolId) {
     await userService.update(user.id, { lastLogin: new Date() });
   }
 
-  const userJson = user.toJSON();
-  delete userJson.password;
-  delete userJson.created_at;
-  delete userJson.updated_at;
-  delete userJson.archived_at;
-  delete userJson.archivedBy;
-
   const token = refreshTokens.accessTokenFor(user);
   const { raw: refreshToken } = await refreshTokens.issue(user.id);
 
-  return { user: userJson, token, refreshToken, portal: getPortalForRole(user.role) };
+  return {
+    user: publicUser(user),
+    token,
+    refreshToken,
+    portal: getPortalForRole(user.role),
+    permissions: await effectivePermissionList(user),
+  };
 }
 
 
@@ -219,6 +239,7 @@ async function sendUserInvitation(user, role, schoolName) {
 module.exports = {
   findUserForAuth,
   signIn,
+  session,
   generateToken,
   verifyToken,
   forgotPassword,

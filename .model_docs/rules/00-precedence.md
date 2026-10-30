@@ -12,7 +12,7 @@
 
 ## Product shape
 
-One school system, three phases, one data set:
+Multi-tenant SaaS. Each school (each campus is its own school) runs three phases on one data set:
 
 - Phase 1 — internal management: sessions, classes, subjects, teachers, timetable, admissions, students, exams, fees, finance, reports, offline fee sync.
 - Phase 2 — teacher portal: own classes only. Attendance, lessons, updates, marks.
@@ -46,7 +46,7 @@ Do not invent answers. Until the school confirms them, use the working default a
 | Mandatory admission fields and documents | Asked, not confirmed | Wizard requires name, DOB, class, guardian, phone, and a decision. Default docs: birth certificate, SLC, CNIC, photo. |
 | Interview mandatory / pass mark | Asked, not confirmed | Interview step exists. No minimum score. |
 | Multiple guardians | Asked, not confirmed | A student may have more than one parent link. One may be primary. |
-| Bulk promotion | Not requested | Not implemented. Do not add it as if it were required. |
+| Bulk promotion | Not requested by the SRS | Implemented (promote / bulk-promote). Promotion fee is billed once per student from the target class Fee Structure. |
 | Timetable conflict: block or warn | Asked | Block. Substitutes are a separate workflow, not a warning bypass. |
 | Tied ranks | Asked | Not implemented. Do not pick a tie policy silently. |
 | Attendance edit window | "Same day or same week, as configured" | No lock in the live store. Do not pretend a window exists until one is configured. |

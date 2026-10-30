@@ -61,7 +61,16 @@ module.exports = {
       await insert("school_settings", [
         ["dailyTestRules", { passPercent: 40, maxFailsPerMonth: 1, lowMarksEnabled: true, lowMarksMinPassed: 3, lowMarksBelowPercent: 55 }],
         ["resultVisibility", { feeRule: "all_due_paid", requireOverrideReason: true }],
-        ["fees", { defaultMonthlyFee: 8500, dueDay: 10, maxAdvanceMonths: 12 }],
+        ["fees", {
+          dueDay: 10,
+          maxAdvanceMonths: 12,
+          concessionPolicy: {
+            allowedModes: ["percent", "fixed_discount", "waiver"],
+            approvalRule: "none",
+            approvalPercentAbove: null,
+            approvalAmountAbove: null,
+          },
+        }],
         ["admission", { prefix: "CLS", digits: 4 }],
       ].map(([key, value]) => withSchool({ key, value: JSON.stringify(value) })));
 

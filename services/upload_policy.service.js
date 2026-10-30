@@ -2,7 +2,7 @@
 
 const { Applications } = require("../models");
 const { APPLICATION_STATUS } = require("../constants");
-const { can } = require("../constants/permissions");
+const { hasPermission } = require("./permission.service");
 const ApiError = require("../utils/ApiError");
 
 const IMAGE_TYPES = ["image/jpeg", "image/png"];
@@ -27,14 +27,14 @@ const FOLDERS = [
     pattern: /^avatars$/,
     types: IMAGE_TYPES,
     async authorize(user) {
-      if (!can(user.role, "users.create")) throw new ApiError(403, "You can't upload profile photos.");
+      if (!hasPermission(user, "users.create")) throw new ApiError(403, "You can't upload profile photos.");
     },
   },
   {
     pattern: /^admissions\/(\d+)\/documents$/,
     types: DOCUMENT_TYPES,
     async authorize(user, [applicationId]) {
-      if (!can(user.role, "admissions.manage")) throw new ApiError(403, "You can't upload admission documents.");
+      if (!hasPermission(user, "admissions.manage")) throw new ApiError(403, "You can't upload admission documents.");
       const app = await Applications.findOne({ where: { id: applicationId, fkSchoolId: user.schoolId } });
       if (!app) throw new ApiError(404, "Application not found");
       if (app.status === APPLICATION_STATUS.ENROLLED) throw new ApiError(400, "Enrolled applications cannot be edited");

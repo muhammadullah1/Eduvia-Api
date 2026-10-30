@@ -7,6 +7,7 @@ const ApiError = require("../utils/ApiError");
 const auditService = require("./audit.service");
 const { syncClassStatus } = require("./class.service");
 const lifecycle = require("./lifecycle.service");
+const feeService = require("./fee.service");
 
 /**
  * `scope` narrows rows for restricted roles: parents get their linked
@@ -137,6 +138,7 @@ async function promote(actor, id, { classId, sessionId, date }) {
       outcome: "Promoted",
     }, { transaction });
     await student.update({ fkClassId: nextClass.id }, { transaction });
+    await feeService.billPromotionIfConfigured(actor, student, nextClass, date, transaction);
     await syncClassStatus([previousClassId, nextClass.id], transaction);
     await auditService.record(actor, `promoted student #${student.id} to class #${nextClass.id}`, {
       entityType: "student",

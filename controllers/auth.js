@@ -10,13 +10,23 @@ const ApiError = require("../utils/ApiError");
 async function signIn(req, res, next) {
   try {
     const { email, password, schoolId } = req.body;
-    const { user, token, refreshToken, portal } = await authService.signIn(email, password, schoolId);
+    const { user, token, refreshToken, portal, permissions } = await authService.signIn(email, password, schoolId);
     res.cookie(refreshTokens.COOKIE_NAME, refreshToken, refreshTokens.cookieOptions());
     return res.status(200).json({
       success: true,
       message: "User signed in successfully",
-      data: { user, token, portal },
+      data: { user, token, portal, permissions },
     });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/** The signed-in user with their portal and effective permissions. */
+async function me(req, res, next) {
+  try {
+    const data = await authService.session(req.user.id);
+    res.status(200).json({ success: true, message: "Session", data });
   } catch (err) {
     next(err);
   }
@@ -126,6 +136,7 @@ async function resetPassword(req, res, next) {
 
 module.exports = {
   signIn,
+  me,
   refresh,
   logout,
   updatePassword,

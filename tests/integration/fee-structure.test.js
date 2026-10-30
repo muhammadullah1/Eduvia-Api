@@ -98,7 +98,6 @@ describe("fee structure API", () => {
     expect(await svc.tuitionForMonth(klass.id, "2026-11")).toBe(1500);
 
     const student = await makeStudent(school.id, klass.id, { admissionDate: "2026-04-01" });
-    const fixed = await makeStudent(school.id, klass.id, { admissionDate: "2026-04-01", fixedMonthlyFee: 700 });
     const actor = { id: users.admin.id, schoolId: school.id, role: "super_admin" };
     await feeService.generateMonths(actor, { month: "2026-11", classId: klass.id });
     const months = await StudentFeeMonths.findAll({
@@ -112,11 +111,9 @@ describe("fee structure API", () => {
       ["2026-11", 1500],
     ]);
     expect(Number(months[0].collectibleAmount)).toBe(1000);
-    const fixedMonths = await StudentFeeMonths.findAll({ where: { fkStudentId: fixed.id, month: "2026-11", feeType: "Tuition" } });
-    expect(Number(fixedMonths[0].netAmount)).toBe(700);
   });
 
-  test("a 0 tuition row still bills the school default", async () => {
+  test("a missing or zero tuition structure does not bill a school fallback", async () => {
     const zero = await makeClass(school.id, currentSession.id, "Zero fee");
     await Classes.update({ monthlyTuitionFee: 0 }, { where: { id: zero.id }, hooks: false });
     await FeeStructures.destroy({ where: { fkClassId: zero.id, feeType: "Tuition" } });
@@ -130,11 +127,18 @@ describe("fee structure API", () => {
       effectiveFrom: "2026-04-01",
     });
     const student = await makeStudent(school.id, zero.id, { admissionDate: "2026-04-01" });
-    const settings = await require("../../services/settings.service").get(school.id, require("../../constants").SETTING_KEYS.FEES);
     const actor = { id: users.admin.id, schoolId: school.id, role: "super_admin" };
+    const preview = await feeService.previewGeneration(actor, { month: "2026-05", classId: zero.id });
+    expect(preview.missingStructures?.length).toBeGreaterThan(0);
+    expect(preview.missingStructures[0].message).toMatch(/No fee structure for .* \/ Tuition/);
+    expect(preview.canConfirm).toBe(false);
+    expect(preview.totals.bills).toBe(0);
+
     await feeService.generateMonths(actor, { month: "2026-05", classId: zero.id });
-    const [may] = await StudentFeeMonths.findAll({ where: { fkStudentId: student.id, month: "2026-05", feeType: "Tuition" } });
-    expect(Number(may.netAmount)).toBe(Number(settings.defaultMonthlyFee));
+    const may = await StudentFeeMonths.findAll({
+      where: { fkStudentId: student.id, month: "2026-05", feeType: "Tuition" },
+    });
+    expect(may).toHaveLength(0);
   });
 
   test("editing the fee on a future-session class form records Tuition", async () => {

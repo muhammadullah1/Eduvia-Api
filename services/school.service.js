@@ -1,6 +1,7 @@
 "use strict";
 
-const { Schools } = require("../models");
+const { Schools, sequelize } = require("../models");
+const permissionService = require("./permission.service");
 const ApiError = require("../utils/ApiError");
 
 async function getById(id) {
@@ -20,8 +21,13 @@ async function update(schoolId, data) {
   return school;
 }
 
+/** A new school starts with the five system roles and today's default permissions. */
 async function create(data) {
-  return Schools.create(data);
+  return sequelize.transaction(async (transaction) => {
+    const school = await Schools.create(data, { transaction });
+    await permissionService.ensureSystemRoles(school.id, transaction);
+    return school;
+  });
 }
 
 module.exports = { getById, getCurrent, update, create };

@@ -19,6 +19,7 @@ const {
   Exams,
   ClassSubjects,
 } = require("../../models");
+const { actorFor } = require("../helpers/school");
 const studentService = require("../../services/student.service");
 const leaveService = require("../../services/leave.service");
 const reportService = require("../../services/report.service");
@@ -119,7 +120,7 @@ async function buildSchool() {
   });
   const parent = await Parents.create({ fkSchoolId: school.id, fkUserId: parentUser.id, fatherName: "Imran Khan" });
   await StudentParents.create({ fkStudentId: student.id, fkParentId: parent.id, relationshipType: "Father", isPrimary: true });
-  const actor = { id: admin.id, schoolId: school.id, role: admin.role, email: admin.email };
+  const actor = await actorFor(admin);
   return { school, session, admin, ops, accountant, teacherUser, teacher, parentUser, subject, klass, next, student, actor, stamp };
 }
 
@@ -202,7 +203,7 @@ describe("lifecycle, leave, reports, and documents", () => {
     });
     await feeService.recordPayment(fx.actor, { studentId: fx.student.id, amount: 1000, paidOn: today(), method: "Cash" });
     const adminView = await reportService.dashboard(fx.actor);
-    const opsView = await reportService.dashboard({ id: fx.ops.id, schoolId: fx.school.id, role: fx.ops.role, email: fx.ops.email });
+    const opsView = await reportService.dashboard(await actorFor(fx.ops));
     expect(adminView.cards.fees.collectedThisMonth).toBeGreaterThan(0);
     expect(adminView.graphs.monthlyFeeCollection.length).toBeGreaterThan(0);
     expect(adminView.graphs.studentsByClass.length).toBeGreaterThan(0);

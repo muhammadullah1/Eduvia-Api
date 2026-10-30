@@ -1,6 +1,6 @@
 "use strict";
 
-const { can } = require("../constants/permissions");
+const { hasPermission } = require("../services/permission.service");
 
 /**
  * Fee amounts are Super Admin + Accountant data (parents see their own child's).
@@ -13,8 +13,8 @@ const { can } = require("../constants/permissions");
 const STRIP = new Set(["monthlyFee", "monthlyTuitionFee", "monthly_tuition_fee", "fixedMonthlyFee", "fixed_monthly_fee", "financialStatus", "creditBalance", "credit_balance"]);
 const TO_FLAG = new Set(["outstandingAmount", "outstanding_amount"]);
 
-function seesFeeAmounts(role) {
-  return Boolean(role) && can(role, "fees.amounts.read");
+function seesFeeAmounts(user) {
+  return hasPermission(user, "fees.amounts.read");
 }
 
 function redact(value, depth = 0) {
@@ -36,7 +36,7 @@ function redact(value, depth = 0) {
 
 function redactFeeFields(req, res, next) {
   const json = res.json.bind(res);
-  res.json = (body) => (req.user && !seesFeeAmounts(req.user.role) ? json(redact(body)) : json(body));
+  res.json = (body) => (req.user && !seesFeeAmounts(req.user) ? json(redact(body)) : json(body));
   next();
 }
 

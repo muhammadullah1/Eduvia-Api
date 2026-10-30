@@ -8,7 +8,7 @@
  */
 const app = require("../../app");
 const { sequelize, StudentFeeMonths, AuditLogs, AcademicSessions, FeeStructures } = require("../../models");
-const { makeSchool, makeUser, tokenFor, makeStudent, makeParent } = require("../helpers/school");
+const { actorFor, makeSchool, makeUser, tokenFor, makeStudent, makeParent } = require("../helpers/school");
 const { request } = require("../helpers/http");
 const feeService = require("../../services/fee.service");
 const classService = require("../../services/class.service");
@@ -18,7 +18,6 @@ const { FEE_TYPE_FREQUENCY } = require("../../constants/finance");
 const formClass = (schoolId, sessionId, label, fee = 1000) =>
   classService.create(schoolId, { fkSessionId: sessionId, grade: label, section: "A", label, monthlyTuitionFee: fee, capacity: 30 });
 const call = (token, method, path, body) => request(app, { method, path: `/api${path}`, token, body });
-const actorOf = (u, schoolId, role = "super_admin") => ({ id: u.id, schoolId, role });
 
 /** Seed structure rows directly (session lock blocks mid-session API writes). */
 async function seedFee(fx, feeType, amount, effectiveFrom) {
@@ -42,17 +41,35 @@ async function fixture(label) {
   const { school, session } = await makeSchool();
   const admin = await makeUser(school.id, "super_admin");
   const klass = await formClass(school.id, session.id, label);
-  return { school, session, admin, actor: actorOf(admin, school.id), klass };
+  return { school, session, admin, actor: await actorFor(admin), klass };
 }
 
 beforeAll(() => sequelize.authenticate());
 afterAll(() => sequelize.close());
 
 describe("amounts and effective dates", () => {
-  test("each month uses the Tuition amount in force; a fixed-fee override wins", async () => {
+  test("each month uses the Tuition amount in force; Approved concession adjusts net", async () => {
     const fx = await fixture("Amounts");
     const regular = await makeStudent(fx.school.id, fx.klass.id);
-    const fixed = await makeStudent(fx.school.id, fx.klass.id, { fixedMonthlyFee: 700 });
+    const discounted = await makeStudent(fx.school.id, fx.klass.id);
+    const { SchoolConcessionReasons } = require("../../models");
+    const feeConcessionService = require("../../services/fee_concession.service");
+    const reason = await SchoolConcessionReasons.create({
+      fkSchoolId: fx.school.id,
+      label: "Hardship",
+      defaultMode: "fixed_discount",
+      defaultValue: 300,
+      sortOrder: 1,
+      active: true,
+    });
+    await feeConcessionService.assign(fx.actor, {
+      studentId: discounted.id,
+      reasonId: reason.id,
+      mode: "fixed_discount",
+      value: 300,
+      feeType: "Tuition",
+      effectiveFrom: "2026-04-01",
+    });
     await seedFee(fx, "Tuition", 1200, "2026-07-01");
     await feeService.generateMonths(fx.actor, { month: "2026-08", classId: fx.klass.id });
 
@@ -60,7 +77,7 @@ describe("amounts and effective dates", () => {
       ["2026-04", "2026-05", "2026-06"].map((m) => ({ month: m, type: "Tuition", due: 1000 }))
         .concat(["2026-07", "2026-08"].map((m) => ({ month: m, type: "Tuition", due: 1200 }))),
     );
-    expect((await bills(fixed.id)).map((b) => b.due)).toEqual([700, 700, 700, 700, 700]);
+    expect((await bills(discounted.id)).map((b) => b.due)).toEqual([700, 700, 700, 900, 900]);
   });
 
   test("ledger starts at the admission month for students admitted mid-session", async () => {
@@ -174,7 +191,7 @@ describe("duplicates, preview and audit", () => {
     await seedFee(fx, "Exam", 600, "2026-05-01")
     const kids = [
       await makeStudent(fx.school.id, fx.klass.id),
-      await makeStudent(fx.school.id, fx.klass.id, { fixedMonthlyFee: 400 }),
+      await makeStudent(fx.school.id, fx.klass.id),
       await makeStudent(fx.school.id, second.id),
     ];
     const ids = kids.map((k) => k.id);
@@ -189,8 +206,8 @@ describe("duplicates, preview and audit", () => {
     const strip = (r) => r.classes.map(({ classId, students, bills, totalDue, byType }) => ({ classId, students, bills, totalDue, byType }));
     expect(strip(result)).toEqual(strip(preview));
     expect(result.totals.totalDue).toBe(preview.totals.totalDue);
-    // A: 2 months x (1000 + 400) + Exam 600 x 2; B: 2 x 1500
-    expect(preview.totals.totalDue).toBe(2800 + 1200 + 3000);
+    // A: 2 students × (2 months × 1000 + Exam 600); B: 1 student × 2 × 1500
+    expect(preview.totals.totalDue).toBe(2 * (2000 + 600) + 3000);
     expect(await countFor(ids)).toBe(preview.totals.bills);
 
     const audit = await AuditLogs.findOne({ where: { fkSchoolId: fx.school.id }, order: [["id", "DESC"]] });

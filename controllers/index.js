@@ -28,4 +28,5 @@ module.exports = {
   noticeController: require("./notice"),
   leaveController: require("./leave"),
   reportController: require("./report"),
+  roleController: require("./role"),
 };

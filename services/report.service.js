@@ -15,7 +15,7 @@ const {
   OtherIncomes,
 } = require("../models");
 const { USER_ROLES, STUDENT_STATUS, SHEET_STATUS } = require("../constants");
-const { can } = require("../constants/permissions");
+const { hasPermission } = require("./permission.service");
 const teacherService = require("./teacher.service");
 const parentService = require("./parent.service");
 const { today } = require("../utils/dates");
@@ -120,7 +120,7 @@ async function managementDashboard(user) {
     })),
   };
 
-  if (can(user.role, "fees.totals")) {
+  if (hasPermission(user, "fees.totals")) {
     const sessionPayments = payments.filter((payment) => !session || inSession(payment.paymentDate, session));
     const sessionExpenses = expenses.filter((expense) => !session || inSession(expense.expenseDate, session));
     const thisMonth = feeMonths.filter((month) => monthStamp(month.month) === current);

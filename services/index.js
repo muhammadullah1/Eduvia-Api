@@ -35,4 +35,6 @@ module.exports = {
   leaveService: require("./leave.service"),
   reportService: require("./report.service"),
   documentService: require("./document.service"),
+  permissionService: require("./permission.service"),
+  roleService: require("./role.service"),
 };
