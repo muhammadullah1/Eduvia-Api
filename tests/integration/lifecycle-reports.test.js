@@ -22,7 +22,6 @@ const {
 const { actorFor } = require("../helpers/school");
 const studentService = require("../../services/student.service");
 const leaveService = require("../../services/leave.service");
-const reportService = require("../../services/report.service");
 const examService = require("../../services/exam.service");
 const feeService = require("../../services/fee.service");
 const documentService = require("../../services/document.service");
@@ -192,29 +191,6 @@ describe("lifecycle, leave, reports, and documents", () => {
       body: { studentId: fx.student.id, startDate: "2026-11-01", endDate: "2026-11-02", reason: "Teacher cannot request" },
     });
     expect(teacherDenied.status).toBe(403);
-  });
-
-  test("the dashboard omits fee and finance figures from operations managers", async () => {
-    const fx = await buildSchool();
-    const month = today().slice(0, 7);
-    await StudentFeeMonths.create({
-      fkSchoolId: fx.school.id, fkStudentId: fx.student.id, month, feeType: "Tuition",
-      baseAmount: 1000, discountAmount: 0, netAmount: 1000, paidAmount: 0, status: "Unpaid",
-    });
-    await feeService.recordPayment(fx.actor, { studentId: fx.student.id, amount: 1000, paidOn: today(), method: "Cash" });
-    const adminView = await reportService.dashboard(fx.actor);
-    const opsView = await reportService.dashboard(await actorFor(fx.ops));
-    expect(adminView.cards.fees.collectedThisMonth).toBeGreaterThan(0);
-    expect(adminView.graphs.monthlyFeeCollection.length).toBeGreaterThan(0);
-    expect(adminView.graphs.studentsByClass.length).toBeGreaterThan(0);
-    expect(opsView.cards.students.active).toBeGreaterThan(0);
-    expect(opsView.cards.fees).toBeUndefined();
-    expect(opsView.graphs.monthlyFeeCollection).toBeUndefined();
-    expect(opsView.graphs.paidVsUnpaid).toBeUndefined();
-    expect(opsView.graphs.incomeVsExpenses).toBeUndefined();
-    expect(opsView.graphs.examinationPerformance).toEqual([]);
-    const blocked = await httpRaw({ method: "GET", path: "/api/reports/dashboard", token: tokenFor(fx.accountant, fx.school) });
-    expect(blocked.status).toBe(403);
   });
 
   test("a published result can be downloaded without a rank, and unpaid fees withhold the parent copy", async () => {

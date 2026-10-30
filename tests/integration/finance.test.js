@@ -205,15 +205,14 @@ describe("finance", () => {
     expect(breakdown.expenses.find((b) => b.key === "StaffSalary").percent).toBe(65.3);
   });
 
-  test("the dashboard finance card counts other income too", async () => {
-    const month = today().slice(0, 7);
-    const dash = (await call(tok.admin, "GET", "/reports/dashboard")).body.data;
-    const rep = (await call(tok.admin, "GET", `/finance/report?period=${month}`)).body.data;
-    expect(dash.cards.finance.otherIncome).toBeGreaterThan(0);
-    expect(dash.cards.finance.income).toBe(r2(dash.cards.finance.feeIncome + dash.cards.finance.otherIncome));
-    const point = dash.graphs.incomeVsExpenses.find((m) => m.month === month);
-    expect(r2(point.income)).toBe(rep.totals.income);
-    expect(r2(point.expenses)).toBe(rep.totals.expenses);
+  test("the dashboard reconciles with the finance report for every period", async () => {
+    for (const key of [MONTH, CUR.quarter, CUR.fy]) {
+      const dash = (await call(tok.admin, "GET", `/dashboard?period=${key}`)).body.data.widgets;
+      const rep = (await call(tok.admin, "GET", `/finance/report?period=${key}`)).body.data;
+      expect(dash.finance.collected).toBe(rep.totals.feeIncome);
+      expect(dash.incomeVsExpenses).toEqual({ income: rep.totals.income, expenses: rep.totals.expenses, net: rep.totals.net });
+      expect(r2(dash.finance.byMethod.reduce((s, m) => s + m.amount, 0))).toBe(rep.totals.feeIncome);
+    }
   });
 
   test("fee income reconciles with the monthly fee collection report", async () => {

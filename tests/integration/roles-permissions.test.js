@@ -146,7 +146,9 @@ describe("dynamic roles and permissions", () => {
     expect(overview.status).toBe(200);
     expect(JSON.stringify(overview.body)).not.toMatch(TOTAL_KEYS);
     expect((await call(tokenFor(a.acc), "GET", "/fees/summary")).status).toBe(403);
-    expect((await call(tokenFor(a.acc), "GET", "/reports/dashboard")).status).toBe(403);
+    const home = await call(tokenFor(a.acc), "GET", "/dashboard");
+    expect(home.status).toBe(200);
+    expect(JSON.stringify(home.body)).not.toMatch(TOTAL_KEYS);
   });
 
   test("role changes move staff between staff roles and keep an active Super Admin", async () => {
