@@ -1,7 +1,7 @@
 const pino = require("pino");
 const pinoHttp = require("pino-http");
 
-const isDev = process.env.NODE_ENV !== "production";
+const isDev = process.env.NODE_ENV === "development";
 
 const logger = pino({
   level: process.env.LOG_LEVEL || (isDev ? "debug" : "info"),
