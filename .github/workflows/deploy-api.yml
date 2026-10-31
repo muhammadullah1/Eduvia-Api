@@ -1,0 +1,161 @@
+name: Deploy API
+
+# Branch strategy (docs/DEPLOYMENT-STAGE.md):
+#   push to dev            -> staging environment (dev/stage Oracle server), automatically
+#   Run workflow, staging  -> any branch to staging (e.g. a feature branch)
+#   Run workflow, production -> production, only from main; the "production" GitHub Environment
+#                              should also require a reviewer.
+on:
+  push:
+    branches: [dev]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Target environment
+        type: choice
+        options: [staging, production]
+        default: staging
+
+permissions:
+  contents: read
+
+env:
+  # package.json engines: node >=18; the server must run the same major (see docs/DEPLOYMENT-STAGE.md).
+  NODE_VERSION: "20"
+
+jobs:
+  test:
+    name: Lint and test
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: eduvia
+          POSTGRES_PASSWORD: eduvia_ci
+          POSTGRES_DB: eduvia_test_db
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U eduvia"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      # Throwaway CI database and secret only; no real credentials. config/environments/test.json is
+      # not in git, so the test config comes entirely from these variables.
+      NODE_ENV: test
+      DATABASE_HOST: 127.0.0.1
+      DATABASE_PORT: "5432"
+      DATABASE_NAME: eduvia_test_db
+      DATABASE_USERNAME: eduvia
+      DATABASE_PASSWORD: eduvia_ci
+      JWT_SECRET: ci-only-jwt-secret-not-used-anywhere-else
+      LOG_LEVEL: warn
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - name: Migrate test database
+        run: npm run db:migrate
+      - name: Jest
+        run: npx jest --config tests/jest.config.js --runInBand --forceExit
+
+  deploy:
+    name: Deploy (${{ inputs.environment || 'staging' }})
+    needs: test
+    # Production only from main.
+    if: inputs.environment != 'production' || github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment:
+      name: ${{ inputs.environment || 'staging' }}
+      url: ${{ vars.API_HEALTH_URL }}
+    concurrency:
+      group: deploy-api-${{ inputs.environment || 'staging' }}
+      cancel-in-progress: false
+    env:
+      SERVER_HOST: ${{ secrets.SERVER_HOST }}
+      SERVER_USER: ${{ secrets.SERVER_USER }}
+      SERVER_PORT: ${{ vars.SERVER_PORT || '22' }}
+      APP_DIR: ${{ vars.APP_DIR }}
+      PM2_APP_NAME: ${{ vars.PM2_APP_NAME }}
+      API_HEALTH_URL: ${{ vars.API_HEALTH_URL }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check environment settings
+        env:
+          SERVER_SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
+          SERVER_KNOWN_HOSTS: ${{ secrets.SERVER_KNOWN_HOSTS }}
+        run: |
+          missing=""
+          for name in SERVER_HOST SERVER_USER SERVER_SSH_KEY SERVER_KNOWN_HOSTS APP_DIR PM2_APP_NAME API_HEALTH_URL; do
+            test -n "${!name}" || missing="$missing $name"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::Missing GitHub environment secrets/variables:$missing"
+            exit 1
+          fi
+
+      - name: Configure SSH
+        env:
+          SERVER_SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
+          SERVER_KNOWN_HOSTS: ${{ secrets.SERVER_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SERVER_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          # Pinned host key (no ssh-keyscan trust-on-first-use).
+          printf '%s\n' "$SERVER_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          printf 'Host app\n  HostName %s\n  User %s\n  Port %s\n  IdentityFile ~/.ssh/deploy_key\n  StrictHostKeyChecking yes\n' \
+            "$SERVER_HOST" "$SERVER_USER" "$SERVER_PORT" > ~/.ssh/config
+
+      - name: Upload application
+        # .env lives only on the server (APP_DIR/.env) and is never uploaded or deleted: --delete skips excluded paths.
+        run: |
+          # shellcheck disable=SC2029 # values are meant to expand on the runner
+          ssh app "mkdir -p '$APP_DIR'"
+          rsync -az --delete \
+            --exclude .git --exclude .github --exclude node_modules \
+            --exclude '.env' --exclude '.env.*' --exclude config/environments \
+            --exclude tests --exclude logs \
+            ./ "app:$APP_DIR/"
+
+      - name: Install, migrate and reload
+        # Migrations and the app load the same config: a missing or unsafe variable in the server .env
+        # stops the deploy here, before the running process is touched.
+        run: |
+          # shellcheck disable=SC2029 # values are meant to expand on the runner
+          ssh app "APP_DIR='$APP_DIR' PM2_APP_NAME='$PM2_APP_NAME' bash -s" <<'REMOTE'
+          set -euo pipefail
+          cd "$APP_DIR"
+          test -f .env || { echo "Missing $APP_DIR/.env on the server (copy .env.example and fill it)"; exit 1; }
+          node -e 'const [major] = process.versions.node.split("."); if (Number(major) < 18) { console.error("Node >= 18 required"); process.exit(1) }'
+          # sequelize-cli is a devDependency: install everything, migrate, then drop dev packages.
+          npm ci
+          npx --no-install sequelize db:migrate
+          npm prune --omit=dev
+          if pm2 describe "$PM2_APP_NAME" > /dev/null 2>&1; then
+            pm2 reload ecosystem.config.js --only "$PM2_APP_NAME" --update-env
+          else
+            pm2 start ecosystem.config.js --only "$PM2_APP_NAME"
+          fi
+          pm2 save
+          REMOTE
+
+      - name: Health check
+        run: |
+          for attempt in $(seq 1 12); do
+            if curl -fsS --max-time 5 "$API_HEALTH_URL" > /dev/null; then
+              echo "Healthy after $attempt attempt(s)"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "::error::$API_HEALTH_URL did not return 2xx within 60s"
+          # shellcheck disable=SC2029 # values are meant to expand on the runner
+          ssh app "pm2 logs '$PM2_APP_NAME' --lines 50 --nostream" || true
+          exit 1

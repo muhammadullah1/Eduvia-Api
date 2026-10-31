@@ -4,6 +4,16 @@ Exact configuration and order for deploying Eduvia to **Stage** (`NODE_ENV=stagi
 same steps with production values and `NODE_ENV=production`. Templates: `.env.example` (API) and
 `Eduvia-Frontend/.env.example`. Hosts below are placeholders; never commit real values.
 
+## Branch strategy
+
+| Branch | API (GitHub Actions `deploy-api.yml`) | Frontend (Vercel) |
+| --- | --- | --- |
+| `dev` | every push deploys to the `staging` GitHub Environment (dev/stage Oracle server) | Preview / branch deployment with the Stage `VITE_API_URL` |
+| `main` | production, **manual only**: Actions → Deploy API → Run workflow → `production` (refused from other branches; needs reviewer approval) | Production deployment with the production `VITE_API_URL` |
+| feature branches (`EDUVIA-*`) | optional manual staging deploy via Run workflow → `staging` | Vercel previews |
+
+Feature branches merge into `dev`; `dev` merges into `main` when Stage is verified.
+
 ## 1. Database (PostgreSQL)
 
 - Create an empty database and a login role that owns it (e.g. `eduvia_stage` / `eduvia_app`).
@@ -69,7 +79,28 @@ config) exits immediately with `Eduvia API can't start in staging: - Missing: �
 `CLOUDFLARE_R2_BUCKET`, `CLOUDFLARE_R2_ENDPOINT`, `RESEND_API_KEY` or `EMAIL_FROM` is missing, if `JWT_SECRET` is the
 default or shorter than 32 characters, or if `FRONT_END_URL`/`ALLOWED_ORIGINS` are not https or point to localhost.
 
-Node ≥ 18 (`engines`), `npm ci`, start command `npm start` (`node server.js`), health check `GET /health`.
+Node ≥ 18 (`engines`, CI uses 20), health check `GET /health`. The server keeps settings only in
+`APP_DIR/.env` (never in GitHub). The workflow uploads the code with rsync, runs `npm ci`, migrations and
+`npm prune --omit=dev`, reloads pm2 (`ecosystem.config.js`, 2 cluster instances, so reloads have no downtime)
+and polls `/health`.
+
+### GitHub setup (Settings → Environments)
+
+- Environments `staging` and `production`. `production`: required reviewer, deployment branches limited to `main`.
+- Secrets per environment: `SERVER_HOST`, `SERVER_USER`, `SERVER_SSH_KEY` (private key of a deploy-only
+  ed25519 key), `SERVER_KNOWN_HOSTS` (`ssh-keyscan -H <host>` output, fingerprint checked).
+- Variables per environment: `APP_DIR`, `PM2_APP_NAME`, `API_HEALTH_URL` (`https://<api-host>/health`),
+  optional `SERVER_PORT` (default 22).
+- Branch protection on `dev` and `main`: pull request + passing "Lint and test" check.
+
+### Oracle server prerequisites
+
+- Node 20 + npm, `npm i -g pm2`, `pm2 startup` (start on reboot).
+- Deploy user with the deploy public key in `~/.ssh/authorized_keys`; `APP_DIR` owned by it.
+- `APP_DIR/.env` from `.env.example` (`chmod 600`), `NODE_ENV=staging` on the stage server.
+- PostgreSQL reachable from the VM, database created.
+- nginx/Caddy HTTPS reverse proxy (Let's Encrypt) to the app `PORT`, forwarding `X-Forwarded-*`;
+  Oracle security list / NSG and the VM firewall open on 80/443 only.
 
 ## 5. Frontend (Vercel)
 
@@ -85,9 +116,9 @@ Build `npm run build`, output `dist`; `vercel.json` already rewrites all paths t
 ## 6. Deploy sequence
 
 1. Create the DB, R2 bucket + CORS, Resend domain + key (steps 1–3).
-2. Set the API env (step 4) and deploy the API from `EDUVIA-16` (or its merge). Confirm boot logs show
+2. Set the API env (step 4) and deploy the API (push to `dev`, or Run workflow → `staging`). Confirm boot logs show
    `Eduvia API listening` and no `can't start` error.
-3. Migrate, from a shell with the same env (`NODE_ENV=staging` + DB vars):
+3. Migrations run in the workflow; to check or run them by hand on the server (same `.env`):
    ```bash
    npm run db:migrate          # applies 001–060
    npm run db:migrate:status   # expect 60 "up", 0 "down"
