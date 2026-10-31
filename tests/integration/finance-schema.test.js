@@ -4,7 +4,7 @@ const {
   sequelize, FeeStructures, StudentCreditLedger, FeeImportBatches, FeeImportRows, OtherIncomes, Expenses, FeePayments,
 } = require("../../models");
 const { makeSchool, makeUser, makeClass, makeStudent } = require("../helpers/school");
-const creditBackfill = require("../../database/migrations/060-student-credit-ledger").BACKFILL_SQL;
+const creditBackfill = require("../../database/migrations-archive/060-student-credit-ledger").BACKFILL_SQL;
 const creditService = require("../../services/credit_ledger.service");
 const feeStructureService = require("../../services/fee_structure.service");
 const { defaultPermissionsFor, isGrantable } = require("../../constants/permissions");

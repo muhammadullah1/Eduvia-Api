@@ -40,13 +40,11 @@ const { interviewDateRange } = require("../utils/dates");
 
 const RELATIONS = new Set(["Father", "Mother", "Guardian", "Other"]);
 const PLACEHOLDER_FILE = "pending://local";
-const DEFAULT_DOCUMENT_LABELS = [
-  "Birth Certificate / B-Form",
-  "Previous School Leaving Certificate",
-  "Guardian ID Copy (CNIC)",
-  "Photographs (2 passport size)",
-  "Medical / Vaccination Record",
-];
+const {
+  REQUIRED_ADMISSION_DOCUMENTS,
+  ADMISSION_DOCUMENT_TYPE,
+  INITIAL_DOCUMENT_STATUS,
+} = require("../constants/admissions");
 
 function assertEditable(row) {
   if (row.status === APPLICATION_STATUS.ENROLLED) {
@@ -245,7 +243,7 @@ async function syncDocuments(applicationId, documents, transaction) {
   for (const doc of documents) {
     const label = doc.label || doc.title;
     if (!label) continue;
-    const status = doc.status || "Pending";
+    const status = doc.status || INITIAL_DOCUMENT_STATUS;
     const fileUrl = documentFileRef(applicationId, doc, status);
     // A saved row is matched by its id; a checklist item the portal hasn't saved yet (no id, or a
     // draft id like "birth") by its title, so re-saving the checklist never appends a second copy.
@@ -262,10 +260,10 @@ async function syncDocuments(applicationId, documents, transaction) {
     });
     if (existing) {
       if (storageService.isObjectKey(existing.fileUrl) && existing.fileUrl !== fileUrl) replaced.push(existing.fileUrl);
-      await existing.update({ title: label, status, fileUrl }, { transaction });
+      await existing.update({ status, fileUrl }, { transaction });
     } else if (!rowId) {
       await ApplicationDocuments.create(
-        { fkApplicationId: applicationId, title: label, status, fileUrl, documentType: doc.documentType || "admission" },
+        { fkApplicationId: applicationId, title: label, status, fileUrl, documentType: doc.documentType || ADMISSION_DOCUMENT_TYPE },
         { transaction },
       );
     }
@@ -275,22 +273,31 @@ async function syncDocuments(applicationId, documents, transaction) {
   }
 }
 
+/** Adds any required checklist document the application doesn't have yet (Pending); never duplicates. */
 async function ensureDefaultDocuments(applicationId, transaction) {
-  const existing = await ApplicationDocuments.count({
+  const existing = await ApplicationDocuments.findAll({
     where: { fkApplicationId: applicationId },
+    attributes: ["title"],
     transaction,
   });
-  if (existing > 0) return;
+  const have = new Set(existing.map((row) => row.title));
+  const missing = REQUIRED_ADMISSION_DOCUMENTS.filter((label) => !have.has(label));
+  if (!missing.length) return;
   await ApplicationDocuments.bulkCreate(
-    DEFAULT_DOCUMENT_LABELS.map((label) => ({
+    missing.map((label) => ({
       fkApplicationId: applicationId,
       title: label,
-      status: "Pending",
+      status: INITIAL_DOCUMENT_STATUS,
       fileUrl: null,
-      documentType: "admission",
+      documentType: ADMISSION_DOCUMENT_TYPE,
     })),
     { transaction },
   );
+}
+
+/** The checklist a new application starts with (the wizard shows it before the draft exists). */
+function documentChecklist() {
+  return REQUIRED_ADMISSION_DOCUMENTS.map((label) => ({ label, status: INITIAL_DOCUMENT_STATUS }));
 }
 
 function validateForSubmit(row) {
@@ -421,11 +428,8 @@ async function createDraft(schoolId, data = {}) {
       },
       { transaction: t },
     );
-    if (data.documents?.length) {
-      await syncDocuments(app.id, data.documents, t);
-    } else {
-      await ensureDefaultDocuments(app.id, t);
-    }
+    await syncDocuments(app.id, data.documents, t);
+    await ensureDefaultDocuments(app.id, t);
     return getById(app.id, schoolId, { transaction: t });
   });
 }
@@ -447,11 +451,8 @@ async function create(schoolId, data) {
       },
       { transaction: t },
     );
-    if (documents.length) {
-      await syncDocuments(app.id, documents, t);
-    } else {
-      await ensureDefaultDocuments(app.id, t);
-    }
+    await syncDocuments(app.id, documents, t);
+    await ensureDefaultDocuments(app.id, t);
     return getById(app.id, schoolId, { transaction: t });
   });
 }
@@ -468,6 +469,7 @@ async function update(id, schoolId, data) {
     await row.update(columns, { transaction: t });
     if (documents !== undefined) {
       await syncDocuments(id, documents, t);
+      await ensureDefaultDocuments(id, t);
     }
     return getById(id, schoolId, { transaction: t });
   });
@@ -698,6 +700,7 @@ async function enroll(id, schoolId, { admissionNo } = {}, actor) {
 }
 
 module.exports = {
+  documentChecklist,
   list,
   statusSummary,
   getById,

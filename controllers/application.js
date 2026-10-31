@@ -13,6 +13,13 @@ function serializeEnrollResult(result) {
 }
 
 module.exports = {
+  documentChecklist: (req, res) => {
+    res.status(200).json({
+      success: true,
+      message: "Admission document checklist fetched",
+      data: applicationService.documentChecklist(),
+    });
+  },
   summary: async (req, res, next) => {
     try {
       const counts = await applicationService.statusSummary(req.user.schoolId);

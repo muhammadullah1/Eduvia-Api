@@ -3,6 +3,7 @@
 const Joi = require("joi");
 const { interviewDateRange } = require("../utils/dates");
 const { isValidPhonePk } = require("../utils/pakistan");
+const { REQUIRED_ADMISSION_DOCUMENTS } = require("../constants/admissions");
 
 const phoneSchema = Joi.string().custom((value, helpers) => {
   if (!value || !String(value).trim()) return value;
@@ -14,7 +15,8 @@ const phoneSchema = Joi.string().custom((value, helpers) => {
 
 const docSchema = Joi.object({
   id: Joi.alternatives().try(Joi.number().integer(), Joi.string()),
-  label: Joi.string().required(),
+  // Only the configured checklist; anything else (e.g. the retired Medical record) is rejected.
+  label: Joi.string().valid(...REQUIRED_ADMISSION_DOCUMENTS).required(),
   status: Joi.string().valid("Pending", "Uploaded", "Verified", "Rejected"),
   // A legacy URL/placeholder, or an R2 object key (checked against the application in the service).
   fileUrl: Joi.string()
@@ -71,7 +73,7 @@ module.exports = {
       interviewScore: Joi.string().allow("", null),
       interviewResult: Joi.string().allow("", null),
       notes: Joi.string().allow("", null),
-      documents: Joi.array().items(docSchema),
+      documents: Joi.array().items(docSchema).unique("label"),
     }),
   },
   validateCreate: {
@@ -97,7 +99,7 @@ module.exports = {
       decision: Joi.string().valid("Admit", "Reject", "Waitlist", "").allow(null),
       notes: Joi.string().allow("", null),
       submittedOn: Joi.date().iso().allow(null),
-      documents: Joi.array().items(docSchema),
+      documents: Joi.array().items(docSchema).unique("label"),
     }),
   },
   validateUpdate: {
@@ -122,7 +124,7 @@ module.exports = {
       interviewResult: Joi.string().allow("", null),
       decision: Joi.string().valid("Admit", "Reject", "Waitlist", "").allow(null),
       notes: Joi.string().allow("", null),
-      documents: Joi.array().items(docSchema),
+      documents: Joi.array().items(docSchema).unique("label"),
     }).min(1),
   },
   validateDecide: {

@@ -51,14 +51,19 @@ routes/          Express routers under /api
 models/          Sequelize models (auto-loaded)
 validations/     Joi schemas
 middlewares/     auth, validate, platform
-database/migrations/
+database/migrations/          Consolidated schema, one file per table (see database/MIGRATIONS.md)
+database/migrations-archive/  Original 001–088 history (reference/rollback only)
+database/seeders/             Base school + staff logins (passwords from SEED_* env)
 ```
 
 ## File storage (Cloudflare R2)
 
 Files never pass through the API. The browser asks `POST /api/auth/get-presigned-url`
-(`{dirName, fileName, contentType}`) for a 5-minute presigned PUT, uploads directly to R2,
-then saves the returned `objectKey` through the normal JSON endpoints.
+(`{dirName, fileName, contentType, contentLength}`) for a 5-minute presigned PUT, uploads directly to R2,
+then saves the returned `objectKey` through the normal JSON endpoints. R2 has no presigned POST, so
+Content-Type and the exact Content-Length are signed: the API refuses to sign a file over the folder's
+limit (images 2 MB, admission documents 10 MB) and R2 rejects (403) a body of any other size or type.
+Images are checked again (HEAD) before a record points at them.
 
 - Env: `CLOUDFLARE_R2_ACCOUNT_ID`, `CLOUDFLARE_R2_ACCESS_KEY_ID`, `CLOUDFLARE_R2_SECRET_ACCESS_KEY`,
   `CLOUDFLARE_R2_BUCKET` (required, else 503), `CLOUDFLARE_R2_ENDPOINT`, optional `CLOUDFLARE_R2_PUBLIC_BASE_URL`.

@@ -5,7 +5,7 @@ const permissionService = require("./permission.service");
 const ApiError = require("../utils/ApiError");
 const auditService = require("./audit.service");
 const storageService = require("./storage.service");
-const { schoolLogoKeyPattern } = require("./upload_policy.service");
+const { assertStoredImage, schoolLogoKeyPattern } = require("./upload_policy.service");
 
 /** How long the signed logo link handed to the portal stays valid. */
 const LOGO_LINK_SECONDS = 3600;
@@ -47,6 +47,7 @@ async function update(actor, data) {
     if (changes.logo && !schoolLogoKeyPattern(school.id).test(changes.logo)) {
       throw new ApiError(400, "Upload the logo first; it must be a JPEG in this school's logo folder.");
     }
+    if (changes.logo) await assertStoredImage(changes.logo, ["image/jpeg"]);
     if (changes.email) {
       const taken = await Schools.findOne({ where: { email: changes.email }, transaction });
       if (taken && taken.id !== school.id) throw new ApiError(409, "Another school already uses this email.");
