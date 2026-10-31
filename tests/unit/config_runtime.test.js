@@ -25,35 +25,70 @@ const COMPLETE_STAGE_ENV = {
 };
 
 describe("cookieSettings", () => {
-  test.each(["development", "test"])("%s defaults to Lax and not Secure", (env) => {
-    expect(runtime.cookieSettings(env)).toEqual({ secure: false, sameSite: "lax" });
-  });
+  test.each(["development", "test"])(
+    "%s defaults to Lax and not Secure",
+    (env) => {
+      expect(runtime.cookieSettings(env)).toEqual({
+        secure: false,
+        sameSite: "lax",
+      });
+    },
+  );
 
-  test.each(["staging", "production"])("%s defaults to SameSite=None and Secure", (env) => {
-    expect(runtime.cookieSettings(env, { secure: "", sameSite: "", domain: "" })).toEqual({ secure: true, sameSite: "none" });
-  });
+  test.each(["staging", "production"])(
+    "%s defaults to SameSite=None and Secure",
+    (env) => {
+      expect(
+        runtime.cookieSettings(env, { secure: "", sameSite: "", domain: "" }),
+      ).toEqual({ secure: true, sameSite: "none" });
+    },
+  );
 
   test("explicit values override and the domain is passed through", () => {
-    expect(runtime.cookieSettings("staging", { secure: "TRUE", sameSite: "Strict", domain: " .example.com " })).toEqual({
+    expect(
+      runtime.cookieSettings("staging", {
+        secure: "TRUE",
+        sameSite: "Strict",
+        domain: " .example.com ",
+      }),
+    ).toEqual({
       secure: true,
       sameSite: "strict",
       domain: ".example.com",
     });
-    expect(runtime.cookieSettings("development", { secure: "true", sameSite: "none" })).toEqual({ secure: true, sameSite: "none" });
+    expect(
+      runtime.cookieSettings("development", {
+        secure: "true",
+        sameSite: "none",
+      }),
+    ).toEqual({ secure: true, sameSite: "none" });
   });
 
   test("SameSite=None without Secure is refused", () => {
-    expect(() => runtime.cookieSettings("development", { sameSite: "none" })).toThrow(/requires COOKIE_SECURE=true/);
-    expect(() => runtime.cookieSettings("staging", { secure: "false" })).toThrow(/requires COOKIE_SECURE=true/);
+    expect(() =>
+      runtime.cookieSettings("development", { sameSite: "none" }),
+    ).toThrow(/requires COOKIE_SECURE=true/);
+    expect(() =>
+      runtime.cookieSettings("staging", { secure: "false" }),
+    ).toThrow(/requires COOKIE_SECURE=true/);
   });
 
   test("an insecure cookie is refused in deployed environments even with Lax", () => {
-    expect(() => runtime.cookieSettings("production", { secure: "false", sameSite: "lax" })).toThrow(/can't be false in production/);
+    expect(() =>
+      runtime.cookieSettings("production", {
+        secure: "false",
+        sameSite: "lax",
+      }),
+    ).toThrow(/can't be false in production/);
   });
 
   test("invalid values are rejected", () => {
-    expect(() => runtime.cookieSettings("development", { sameSite: "sometimes" })).toThrow(/COOKIE_SAMESITE/);
-    expect(() => runtime.cookieSettings("development", { secure: "yes" })).toThrow(/COOKIE_SECURE/);
+    expect(() =>
+      runtime.cookieSettings("development", { sameSite: "sometimes" }),
+    ).toThrow(/COOKIE_SAMESITE/);
+    expect(() =>
+      runtime.cookieSettings("development", { secure: "yes" }),
+    ).toThrow(/COOKIE_SECURE/);
   });
 });
 
@@ -75,10 +110,11 @@ describe("trustProxySetting", () => {
 
 describe("parseOrigins (CORS allow-list)", () => {
   test("trims, drops trailing slashes and blanks", () => {
-    expect(runtime.parseOrigins(" https://a.example.com/ ,, https://b.example.com//,")).toEqual([
-      "https://a.example.com",
-      "https://b.example.com",
-    ]);
+    expect(
+      runtime.parseOrigins(
+        " https://a.example.com/ ,, https://b.example.com//,",
+      ),
+    ).toEqual(["https://a.example.com", "https://b.example.com"]);
   });
 });
 
@@ -102,14 +138,25 @@ describe("deployProblems", () => {
   });
 
   test("rejects the default and short JWT secrets", () => {
-    const withDefault = { ...COMPLETE_STAGE_ENV, JWT_SECRET: runtime.DEFAULT_JWT_SECRET };
+    const withDefault = {
+      ...COMPLETE_STAGE_ENV,
+      JWT_SECRET: runtime.DEFAULT_JWT_SECRET,
+    };
     const withShort = { ...COMPLETE_STAGE_ENV, JWT_SECRET: "short-secret" };
-    expect(runtime.deployProblems("staging", withDefault).join()).toMatch(/JWT_SECRET/);
-    expect(runtime.deployProblems("staging", withShort).join()).toMatch(/JWT_SECRET/);
+    expect(runtime.deployProblems("staging", withDefault).join()).toMatch(
+      /JWT_SECRET/,
+    );
+    expect(runtime.deployProblems("staging", withShort).join()).toMatch(
+      /JWT_SECRET/,
+    );
   });
 
   test("rejects localhost and http front-end URLs and origins", () => {
-    const local = { ...COMPLETE_STAGE_ENV, FRONT_END_URL: "http://localhost:5173", ALLOWED_ORIGINS: "https://ok.example.com,http://localhost:5173" };
+    const local = {
+      ...COMPLETE_STAGE_ENV,
+      FRONT_END_URL: "http://localhost:5173",
+      ALLOWED_ORIGINS: "https://ok.example.com,http://localhost:5173",
+    };
     const text = runtime.deployProblems("staging", local).join("\n");
     expect(text).toMatch(/FRONT_END_URL/);
     expect(text).toMatch(/ALLOWED_ORIGINS.*http:\/\/localhost:5173/);
@@ -117,8 +164,15 @@ describe("deployProblems", () => {
   });
 
   test("assertDeployable throws one error naming the problems", () => {
-    expect(() => runtime.assertDeployable("staging", { ...COMPLETE_STAGE_ENV, RESEND_API_KEY: "" })).toThrow(/Missing: RESEND_API_KEY/);
-    expect(() => runtime.assertDeployable("staging", COMPLETE_STAGE_ENV)).not.toThrow();
+    expect(() =>
+      runtime.assertDeployable("staging", {
+        ...COMPLETE_STAGE_ENV,
+        RESEND_API_KEY: "",
+      }),
+    ).toThrow(/Missing: RESEND_API_KEY/);
+    expect(() =>
+      runtime.assertDeployable("staging", COMPLETE_STAGE_ENV),
+    ).not.toThrow();
   });
 });
 
@@ -126,14 +180,21 @@ describe("config startup (child process, no database)", () => {
   const configPath = path.resolve(__dirname, "../../config");
   // Run outside the repo so no local .env is picked up; only PATH and the variables under test are passed.
   const loadConfig = (env) =>
-    spawnSync(process.execPath, ["-e", `require(${JSON.stringify(configPath)}); console.log("loaded")`], {
-      cwd: os.tmpdir(),
-      env: { PATH: process.env.PATH, ...env },
-      encoding: "utf8",
-    });
+    spawnSync(
+      process.execPath,
+      ["-e", `require(${JSON.stringify(configPath)}); console.log("loaded")`],
+      {
+        cwd: os.tmpdir(),
+        env: { PATH: process.env.PATH, ...env },
+        encoding: "utf8",
+      },
+    );
 
   test("staging with missing variables exits non-zero and names them", () => {
-    const result = loadConfig({ NODE_ENV: "staging", DATABASE_HOST: "db.example.com" });
+    const result = loadConfig({
+      NODE_ENV: "staging",
+      DATABASE_HOST: "db.example.com",
+    });
     expect(result.status).not.toBe(0);
     expect(result.stderr).toMatch(/can't start in staging/);
     expect(result.stderr).toMatch(/JWT_SECRET/);
@@ -142,7 +203,10 @@ describe("config startup (child process, no database)", () => {
   });
 
   test("staging maps DB, storage, CORS and cookie settings from the environment", () => {
-    const sequelizePath = path.resolve(__dirname, "../../config/forSequelizeCLI");
+    const sequelizePath = path.resolve(
+      __dirname,
+      "../../config/forSequelizeCLI",
+    );
     const script = `
       const config = require(${JSON.stringify(configPath)});
       const db = require(${JSON.stringify(sequelizePath)});
@@ -156,19 +220,32 @@ describe("config startup (child process, no database)", () => {
       }));`;
     const result = spawnSync(process.execPath, ["-e", script], {
       cwd: os.tmpdir(),
-      env: { PATH: process.env.PATH, NODE_ENV: "staging", ...COMPLETE_STAGE_ENV },
+      env: {
+        PATH: process.env.PATH,
+        NODE_ENV: "staging",
+        ...COMPLETE_STAGE_ENV,
+      },
       encoding: "utf8",
     });
     expect(result.stderr).toBe("");
     const loaded = JSON.parse(result.stdout);
-    expect(loaded.db).toMatchObject({ dialect: "postgres", host: "db.example.com", port: 5432, database: "eduvia_stage", username: "eduvia" });
+    expect(loaded.db).toMatchObject({
+      dialect: "postgres",
+      host: "db.example.com",
+      port: 5432,
+      database: "eduvia_stage",
+      username: "eduvia",
+    });
     expect(loaded.r2).toMatchObject({
       bucket: "eduvia-stage",
       bucketName: "eduvia-stage",
       endpoint: "https://account.r2.cloudflarestorage.com",
       publicBaseUrl: "",
     });
-    expect(loaded.origins).toEqual(["https://stage.example.com", "https://preview.example.com"]);
+    expect(loaded.origins).toEqual([
+      "https://stage.example.com",
+      "https://preview.example.com",
+    ]);
     expect(loaded.cookie).toEqual({ secure: true, sameSite: "none" });
     expect(loaded.trustProxy).toBe(1);
   });

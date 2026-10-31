@@ -35,14 +35,19 @@ function cookieSettings(env, { secure = "", sameSite = "", domain = "" } = {}) {
   if (deployed) resolvedSameSite = "none";
   const requestedSameSite = String(sameSite).trim().toLowerCase();
   if (requestedSameSite) {
-    if (!SAME_SITE_VALUES.includes(requestedSameSite)) throw new Error(`COOKIE_SAMESITE must be one of ${SAME_SITE_VALUES.join(", ")}.`);
+    if (!SAME_SITE_VALUES.includes(requestedSameSite))
+      throw new Error(
+        `COOKIE_SAMESITE must be one of ${SAME_SITE_VALUES.join(", ")}.`,
+      );
     resolvedSameSite = requestedSameSite;
   }
   let resolvedSecure = deployed;
   const requestedSecure = parseBooleanSetting("COOKIE_SECURE", secure);
   if (requestedSecure !== null) resolvedSecure = requestedSecure;
-  if (resolvedSameSite === "none" && !resolvedSecure) throw new Error("COOKIE_SAMESITE=none requires COOKIE_SECURE=true.");
-  if (deployed && !resolvedSecure) throw new Error(`COOKIE_SECURE can't be false in ${env}.`);
+  if (resolvedSameSite === "none" && !resolvedSecure)
+    throw new Error("COOKIE_SAMESITE=none requires COOKIE_SECURE=true.");
+  if (deployed && !resolvedSecure)
+    throw new Error(`COOKIE_SECURE can't be false in ${env}.`);
 
   const settings = { secure: resolvedSecure, sameSite: resolvedSameSite };
   const trimmedDomain = String(domain).trim();
@@ -120,16 +125,29 @@ function deployProblems(nodeEnv, env) {
     emailFrom: value("EMAIL_FROM"),
   };
   const problems = [];
-  const missing = requiredDeploySettings(values).filter(([, found]) => !found).map(([name]) => name);
+  const missing = requiredDeploySettings(values)
+    .filter(([, found]) => !found)
+    .map(([name]) => name);
   if (missing.length) problems.push(`Missing: ${missing.join(", ")}`);
-  if (values.jwtSecret === DEFAULT_JWT_SECRET || (values.jwtSecret && values.jwtSecret.length < MIN_JWT_SECRET_LENGTH)) {
-    problems.push(`JWT_SECRET must be a random value of at least ${MIN_JWT_SECRET_LENGTH} characters, not the default.`);
+  if (
+    values.jwtSecret === DEFAULT_JWT_SECRET ||
+    (values.jwtSecret && values.jwtSecret.length < MIN_JWT_SECRET_LENGTH)
+  ) {
+    problems.push(
+      `JWT_SECRET must be a random value of at least ${MIN_JWT_SECRET_LENGTH} characters, not the default.`,
+    );
   }
-  const insecure = (url) => !/^https:\/\//i.test(url) || /localhost|127\.0\.0\.1/i.test(url);
-  if (values.frontEndUrl && insecure(values.frontEndUrl)) problems.push("FRONT_END_URL must be an https URL that isn't localhost.");
+  const insecure = (url) =>
+    !/^https:\/\//i.test(url) || /localhost|127\.0\.0\.1/i.test(url);
+  if (values.frontEndUrl && insecure(values.frontEndUrl))
+    problems.push("FRONT_END_URL must be an https URL that isn't localhost.");
   const badOrigins = parseOrigins(values.allowedOrigins).filter(insecure);
-  if (badOrigins.length) problems.push(`ALLOWED_ORIGINS must be https and not localhost: ${badOrigins.join(", ")}`);
-  if (values.r2Endpoint && !/^https:\/\//i.test(values.r2Endpoint)) problems.push("CLOUDFLARE_R2_ENDPOINT must be an https URL.");
+  if (badOrigins.length)
+    problems.push(
+      `ALLOWED_ORIGINS must be https and not localhost: ${badOrigins.join(", ")}`,
+    );
+  if (values.r2Endpoint && !/^https:\/\//i.test(values.r2Endpoint))
+    problems.push("CLOUDFLARE_R2_ENDPOINT must be an https URL.");
   return problems;
 }
 
@@ -137,7 +155,9 @@ function deployProblems(nodeEnv, env) {
 function assertDeployable(nodeEnv, env) {
   const problems = deployProblems(nodeEnv, env);
   if (problems.length) {
-    throw new Error(`Eduvia API can't start in ${nodeEnv}:\n- ${problems.join("\n- ")}\nSee .env.example and docs/DEPLOYMENT-STAGE.md.`);
+    throw new Error(
+      `Eduvia API can't start in ${nodeEnv}:\n- ${problems.join("\n- ")}\nSee .env.example and docs/DEPLOYMENT-STAGE.md.`,
+    );
   }
 }
 
