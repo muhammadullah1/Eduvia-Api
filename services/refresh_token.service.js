@@ -6,6 +6,8 @@ const { sequelize, RefreshTokens, Users } = require("../models");
 const { generateToken } = require("../utils");
 const { USER_STATUS } = require("../constants");
 const ApiError = require("../utils/ApiError");
+const config = require("../config");
+const { cookieSettings } = require("../config/runtime");
 
 const ACCESS_TOKEN_TTL = "15m";
 const REFRESH_TTL_MS = 7 * 24 * 60 * 60 * 1000;
@@ -101,12 +103,14 @@ async function revoke(raw) {
   if (row) await revokeFamily(row.familyId);
 }
 
+/**
+ * Staging/production: SameSite=None + Secure, because the portal and the API are on different sites.
+ * Development/test: Lax over plain http. COOKIE_* variables override (see config/runtime.js).
+ */
 function cookieOptions() {
   return {
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    // Production portal and API may sit on different sites; "none" requires secure.
-    sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
+    ...cookieSettings(config.get("env"), config.get("cookie")),
     path: "/api/auth",
     maxAge: REFRESH_TTL_MS,
   };

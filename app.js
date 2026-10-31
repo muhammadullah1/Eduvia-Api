@@ -10,10 +10,14 @@ const { UniqueConstraintError, ValidationError } = require("sequelize");
 const { isDbConnectivityError } = require("./utils/errors");
 const { ALLOWED_ORIGINS } = require("./constants");
 const logger = require("./utils/logger");
+const config = require("./config");
+const { trustProxySetting } = require("./config/runtime");
 
 logger.setupProcessHandlers();
 
 const app = express();
+// Behind the platform's proxy in staging/production, so req.secure / req.ip are the client's.
+app.set("trust proxy", trustProxySetting(config.get("env"), config.get("trustProxy")));
 
 app.use(express.static("assets"));
 app.use(bodyParser.json({ limit: "1mb" }));

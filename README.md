@@ -18,8 +18,8 @@ School management API for Creative Leaders School (Eduvia). Phase 1 covers acade
 
 ```bash
 npm install
-# Create config/environments/development.json (this folder is not in git)
-# Set db credentials, port, frontEndUrl, signInJwtSecret
+# Create config/environments/development.json (this folder is not in git),
+# or copy .env.example to .env (both git-ignored) and set db credentials, port, FRONT_END_URL, JWT_SECRET
 npm run db:migrate
 npm run dev
 ```
@@ -75,27 +75,9 @@ Images are checked again (HEAD) before a record points at them.
 - **CORS:** the bucket's CORS policy must allow `PUT` (and `GET`) with header `Content-Type` from every
   frontend origin, e.g. `http://localhost:5173` and the production portal URL.
 
-## Production checklist (not applied anywhere yet)
+## Staging / production
 
-Known frontend deploy: `https://eduvia-delta.vercel.app` (Vercel, `vercel.json` SPA rewrite only).
-No production API URL is configured in either repo; the deployed bundle calls the relative `/api`.
-
-- API env: `NODE_ENV=production`, `ALLOWED_ORIGINS=https://eduvia-delta.vercel.app`,
-  `FRONT_END_URL=https://eduvia-delta.vercel.app`, `JWT_SECRET`, DB vars, the `CLOUDFLARE_R2_*` vars
-  (leave `CLOUDFLARE_R2_PUBLIC_BASE_URL` empty: the bucket is private).
-- Refresh cookie `eduvia_refresh`: httpOnly, `Secure`, `SameSite=None` (production), `Path=/api/auth`, 7 days.
-  Requires HTTPS on the API.
-- Frontend (Vercel env): `VITE_API_URL=<API origin>/api`. Do not set `VITE_R2_PUBLIC_BASE_URL`.
-- R2 bucket CORS (Cloudflare dashboard → R2 → bucket → Settings → CORS policy):
-
-```json
-[
-  {
-    "AllowedOrigins": ["https://eduvia-delta.vercel.app", "http://localhost:5173"],
-    "AllowedMethods": ["PUT", "GET"],
-    "AllowedHeaders": ["Content-Type"],
-    "ExposeHeaders": ["ETag"],
-    "MaxAgeSeconds": 3600
-  }
-]
-```
+Every setting comes from the environment: see `.env.example` and `docs/DEPLOYMENT-STAGE.md` (config, R2 CORS,
+deploy sequence, migrate, seed, smoke tests). With `NODE_ENV=staging` or `production` the API exits at startup
+with the list of missing or unsafe variables; the refresh cookie is `Secure; SameSite=None` and `trust proxy`
+is on by default in both.

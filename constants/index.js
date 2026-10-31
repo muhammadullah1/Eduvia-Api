@@ -229,7 +229,4 @@ exports.FAIL_GRADE = "F";
 exports.WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
 /** CORS allow-list; set ALLOWED_ORIGINS (comma-separated) per environment. */
-exports.ALLOWED_ORIGINS = String(require("../config").get("allowedOrigins"))
-  .split(",")
-  .map((origin) => origin.trim().replace(/\/+$/, ""))
-  .filter(Boolean);
+exports.ALLOWED_ORIGINS = require("../config/runtime").parseOrigins(require("../config").get("allowedOrigins"));

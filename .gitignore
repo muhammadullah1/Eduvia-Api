@@ -57,3 +57,5 @@ config/environments/
 test.js
 config/tenants.json
 .claude/
+# Committed templates (placeholders only)
+!.env.example
