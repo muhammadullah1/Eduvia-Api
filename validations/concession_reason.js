@@ -14,6 +14,7 @@ module.exports = {
       defaultValue: Joi.number().min(0).allow(null),
       sortOrder: Joi.number().integer().min(0).max(9999),
       active: Joi.boolean(),
+      requiresFamily: Joi.boolean(),
     }).required(),
   },
   validateUpdate: {
@@ -26,6 +27,7 @@ module.exports = {
       defaultValue: Joi.number().min(0).allow(null),
       sortOrder: Joi.number().integer().min(0).max(9999),
       active: Joi.boolean(),
+      requiresFamily: Joi.boolean(),
     })
       .min(1)
       .required(),

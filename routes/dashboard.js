@@ -8,6 +8,6 @@ const v = require("../validations/finance");
 
 const router = express.Router();
 
-router.get("/", authorize("reports.dashboard", "fees.collections.mine"), validate(v.validatePeriod), c.dashboard);
+router.get("/", authorize("reports.dashboard", "fees.collections.mine"), validate(v.validateDashboardPeriod), c.dashboard);
 
 module.exports = router;

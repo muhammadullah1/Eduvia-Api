@@ -250,7 +250,7 @@ describe("attendance review", () => {
 
   test("reports reject unknown classes and other schools", async () => {
     const foreign = await makeSchool();
-    const theirs = await Classes.create({ fkSchoolId: foreign.school.id, fkSessionId: foreign.session.id, grade: "X", section: "A", label: "X", monthlyTuitionFee: 1, capacity: 1 });
+    const theirs = await Classes.create({ fkSchoolId: foreign.school.id, fkSessionId: foreign.session.id, grade: "X", section: "A", label: "X", capacity: 1 });
     expect((await get(tokens.admin, `/review/daily?classId=${theirs.id}&date=${TODAY}`)).status).toBe(404);
     expect((await get(tokens.admin, `/review/monthly?classId=${klass.id}&month=2026-13`)).status).toBe(400);
   });

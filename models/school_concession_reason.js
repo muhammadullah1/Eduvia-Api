@@ -1,5 +1,7 @@
 "use strict";
 
+const { CONCESSION_MODES } = require("../constants/concessions");
+
 module.exports = (sequelize, DataTypes) => {
   const SchoolConcessionReason = sequelize.define(
     "school_concession_reasons",
@@ -27,13 +29,19 @@ module.exports = (sequelize, DataTypes) => {
         allowNull: true,
         field: "default_mode",
         validate: {
-          isIn: [["percent", "fixed_discount", "waiver"]],
+          isIn: [CONCESSION_MODES],
         },
       },
       defaultValue: {
         type: DataTypes.DECIMAL(12, 2),
         allowNull: true,
         field: "default_value",
+      },
+      requiresFamily: {
+        type: DataTypes.BOOLEAN,
+        allowNull: false,
+        defaultValue: false,
+        field: "requires_family",
       },
       sortOrder: {
         type: DataTypes.INTEGER,

@@ -172,11 +172,29 @@ async function history(schoolId, classId, feeType) {
   };
 }
 
-async function syncClassFee(klass, transaction) {
-  const amount = (await tuitionForMonth(klass.id, today(), { transaction })) ?? 0;
-  if (Number(klass.monthlyTuitionFee) !== amount) {
-    await Classes.update({ monthlyTuitionFee: amount }, { where: { id: klass.id }, transaction, hooks: false });
+/**
+ * Tuition in force per class: today once its session has started, else on the session's
+ * first day. Classes without a Tuition row map to 0. Two queries for the whole batch.
+ */
+async function currentTuitionByClass(classes, { transaction } = {}) {
+  const amounts = new Map(classes.map((klass) => [klass.id, 0]));
+  if (!classes.length) return amounts;
+  const sessionIds = [...new Set(classes.map((klass) => klass.fkSessionId))];
+  const sessions = await AcademicSessions.findAll({ where: { id: sessionIds }, transaction, paranoid: false });
+  const startOf = new Map(sessions.map((session) => [session.id, dayOf(session.startDate)]));
+  const rows = await FeeStructures.findAll({
+    where: { fkClassId: [...amounts.keys()], feeType: "Tuition" },
+    order: [["effectiveFrom", "DESC"], ["id", "DESC"]],
+    transaction,
+  });
+  const day = today();
+  for (const klass of classes) {
+    const start = startOf.get(klass.fkSessionId) ?? day;
+    const onDay = start > day ? start : day;
+    const row = rows.find((candidate) => candidate.fkClassId === klass.id && dayOf(candidate.effectiveFrom) <= onDay);
+    if (row) amounts.set(klass.id, Number(row.amount));
   }
+  return amounts;
 }
 
 /**
@@ -219,7 +237,6 @@ async function add(actor, classId, { feeType, amount }) {
       },
       { transaction },
     );
-    if (feeType === "Tuition") await syncClassFee(klass, transaction);
     await auditService.record(
       actor,
       previous
@@ -260,7 +277,6 @@ async function remove(actor, classId, feeType, reason) {
     if (!rows.length) throw new ApiError(404, `${klass.label} has no ${feeType} fee`);
     const inForceRow = (await inForce(klass.id, today(), { transaction, feeType })).get(feeType);
     await archiveLive(klass.id, feeType, { reason, userId: actor.id, transaction });
-    if (feeType === "Tuition") await syncClassFee(klass, transaction);
     await auditService.record(
       actor,
       `removed ${feeType}${inForceRow ? ` (${Number(inForceRow.amount)})` : ""} from ${klass.label}: ${reason}`,
@@ -275,8 +291,7 @@ async function remove(actor, classId, feeType, reason) {
  * Class form path. Uses session start as effective_from. Honours session lock
  * with Tuition bootstrap when no live Tuition row exists.
  */
-async function recordClassFee(klass, { actor = null, isNew = false, transaction } = {}) {
-  const amount = Number(klass.monthlyTuitionFee);
+async function recordClassFee(klass, amount, { actor = null, isNew = false, transaction } = {}) {
   const session = await AcademicSessions.findByPk(klass.fkSessionId, { transaction });
   if (!session) return null;
   const effectiveFrom = dayOf(session.startDate);
@@ -334,6 +349,7 @@ module.exports = {
   add,
   remove,
   tuitionForMonth,
+  currentTuitionByClass,
   recordClassFee,
   monthStart,
   sessionLocked,

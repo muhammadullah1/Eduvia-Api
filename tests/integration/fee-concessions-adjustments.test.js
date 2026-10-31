@@ -24,7 +24,7 @@ describe("fee concessions and adjustments (simplified)", () => {
       grade: "C",
       section: "1",
       label: "C1",
-      monthlyTuitionFee: 1000,
+      monthlyFee: 1000,
       capacity: 40,
     });
     student = await makeStudent(school.id, klass.id, { admissionDate: "2026-04-01" });
@@ -84,6 +84,18 @@ describe("fee concessions and adjustments (simplified)", () => {
     expect(bill.concessionSnapshot.mode).toBe("percent");
   });
 
+  test("a second concession on the same fee type needs an explicit replace", async () => {
+    const res = await call(tok.acc, "POST", "/fee-concessions", {
+      studentId: student.id,
+      reasonId: meritId,
+      mode: "percent",
+      value: 5,
+      feeType: "Tuition",
+      effectiveFrom: "2026-04-01",
+    });
+    expect(res.status).toBe(409);
+  });
+
   test("above-threshold goes pending; SA approves and supersedes prior", async () => {
     const pending = await call(tok.acc, "POST", "/fee-concessions", {
       studentId: student.id,
@@ -92,6 +104,7 @@ describe("fee concessions and adjustments (simplified)", () => {
       value: 40,
       feeType: "Tuition",
       effectiveFrom: "2026-04-01",
+      replaceExisting: true,
     });
     expect(pending.status).toBe(201);
     expect(pending.body.data.status).toBe("PendingApproval");
@@ -104,6 +117,26 @@ describe("fee concessions and adjustments (simplified)", () => {
     expect(approved).toHaveLength(1);
     expect(approved[0].value).toBe(40);
     expect(list.body.data.some((r) => r.status === "Superseded")).toBe(true);
+
+    const bill = await StudentFeeMonths.findOne({
+      where: { fkStudentId: student.id, month: "2026-10", feeType: "Tuition" },
+    });
+    expect(Number(bill.netAmount)).toBe(900);
+  });
+
+  test("a pending request blocks another one for the same fee type", async () => {
+    const first = await call(tok.acc, "POST", "/fee-concessions", {
+      studentId: student.id, reasonId: meritId, mode: "percent", value: 50,
+      feeType: "Tuition", effectiveFrom: "2026-04-01", replaceExisting: true,
+    });
+    expect(first.status).toBe(201);
+    expect(first.body.data.status).toBe("PendingApproval");
+    const second = await call(tok.admin, "POST", "/fee-concessions", {
+      studentId: student.id, reasonId: meritId, mode: "percent", value: 20,
+      feeType: "Tuition", effectiveFrom: "2026-04-01", replaceExisting: true,
+    });
+    expect(second.status).toBe(409);
+    expect((await call(tok.admin, "POST", `/fee-concessions/${first.body.data.id}/reject`, { reason: "Not eligible" })).status).toBe(200);
   });
 
   test("adjustment ledger preserves net and updates collectible; rejects below paid", async () => {

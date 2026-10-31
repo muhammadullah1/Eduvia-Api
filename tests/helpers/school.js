@@ -14,7 +14,8 @@ const { generateToken } = require("../../utils");
 const permissionService = require("../../services/permission.service");
 
 let counter = 0;
-const uid = () => `${Date.now()}${(counter += 1)}`;
+const WORKER = process.env.JEST_WORKER_ID || "0";
+const uid = () => `${WORKER}${Date.now().toString(36)}${(counter += 1)}`;
 
 async function makeSchool() {
   const stamp = uid();
@@ -57,7 +58,6 @@ async function makeClass(schoolId, sessionId, label = `Class ${uid()}`, amount =
     grade: label,
     section: "A",
     label,
-    monthlyTuitionFee: tuition,
     capacity: 30,
   });
   await FeeStructures.create({

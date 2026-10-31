@@ -37,7 +37,6 @@ async function buildFixture() {
     label: "Grade 1 · A",
     grade: "1",
     section: "A",
-    monthlyTuitionFee: 1000,
     capacity: 30,
   });
   return { school, session, admin, klass, stamp };
@@ -142,6 +141,22 @@ describe("application service", () => {
     });
     expect(draft.id).toBeTruthy();
     expect(draft.documents.length).toBeGreaterThan(0);
+  });
+
+  test("re-saving the document checklist (draft ids or none) never duplicates it", async () => {
+    const fx = await buildFixture();
+    const checklist = [
+      { id: "birth", label: "Birth Certificate / B-Form", status: "Pending" },
+      { id: "cnic", label: "Guardian ID Copy (CNIC)", status: "Pending" },
+    ];
+    const draft = await applicationService.createDraft(fx.school.id, { name: "Repeat Saver", fkClassId: fx.klass.id, documents: checklist });
+    await applicationService.update(draft.id, fx.school.id, { documents: checklist });
+    await applicationService.update(draft.id, fx.school.id, { documents: checklist.map(({ label, status }) => ({ label, status })) });
+    const saved = await applicationService.update(draft.id, fx.school.id, {
+      documents: [{ label: "Guardian ID Copy (CNIC)", status: "Uploaded", fileUrl: "https://example.com/cnic.pdf" }],
+    });
+    expect(saved.documents.map((d) => d.label).sort()).toEqual(["Birth Certificate / B-Form", "Guardian ID Copy (CNIC)"]);
+    expect(saved.documents.find((d) => d.label === "Guardian ID Copy (CNIC)").status).toBe("Uploaded");
   });
 
   test("list defaults to page 1 and pageSize 10", async () => {

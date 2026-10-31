@@ -41,7 +41,7 @@ describe("fee structure session lock", () => {
       grade: "Lock",
       section: "A",
       label: "Lock A",
-      monthlyTuitionFee: 1000,
+      monthlyFee: 1000,
       capacity: 30,
     });
     futureClass = await classService.create(school.id, {
@@ -49,7 +49,7 @@ describe("fee structure session lock", () => {
       grade: "Fut",
       section: "A",
       label: "Fut A",
-      monthlyTuitionFee: 2000,
+      monthlyFee: 2000,
       capacity: 30,
     });
   });
@@ -79,7 +79,7 @@ describe("fee structure session lock", () => {
       grade: "Zero",
       section: "A",
       label: "Zero A",
-      monthlyTuitionFee: 0,
+      monthlyFee: 0,
       capacity: 30,
     });
     await FeeStructures.create({

@@ -255,17 +255,30 @@ async function list(user, { classId } = {}) {
     order: [["id", "DESC"]],
   });
   if (user.role !== USER_ROLES.PARENT) return exams;
-  const studentIds = new Set(await accessService.linkedStudentIds(user));
-  return exams
-    .map((exam) => {
-      const plain = exam.get({ plain: true });
-      plain.markSheets = (plain.markSheets || [])
-        .filter((sheet) => sheet.status === "Published")
-        .map((sheet) => ({ ...sheet, rows: (sheet.rows || []).filter((row) => studentIds.has(row.fkStudentId)) }))
-        .filter((sheet) => sheet.rows.length);
-      return plain;
-    })
-    .filter((exam) => exam.markSheets.length);
+  return parentVisibleExams(user, exams);
+}
+
+/**
+ * BR-09/10: a parent sees only published rows of their own children, and only
+ * for students whose fee rule passes or who hold an active override.
+ */
+async function parentVisibleExams(user, exams) {
+  const studentIds = await accessService.linkedStudentIds(user);
+  const { feeRule } = await settingsService.get(user.schoolId, SETTING_KEYS.RESULT_VISIBILITY);
+  const visible = [];
+  for (const exam of exams) {
+    const allowed = new Set();
+    for (const studentId of studentIds) {
+      if ((await visibility(user.schoolId, exam, studentId, feeRule)).visible) allowed.add(studentId);
+    }
+    const plain = exam.get({ plain: true });
+    plain.markSheets = (plain.markSheets || [])
+      .filter((sheet) => sheet.status === SHEET_STATUS.PUBLISHED)
+      .map((sheet) => ({ ...sheet, rows: (sheet.rows || []).filter((row) => allowed.has(row.fkStudentId)) }))
+      .filter((sheet) => sheet.rows.length);
+    if (plain.markSheets.length) visible.push(plain);
+  }
+  return visible;
 }
 
 async function createSheetForClass(actor, exam, klass, subjectId, marks, transaction) {
@@ -466,11 +479,11 @@ async function parentResults(user, studentId) {
   const student = await accessService.assertStudentAccess(user, studentId);
   const { feeRule } = await settingsService.get(user.schoolId, SETTING_KEYS.RESULT_VISIBILITY);
   const exams = await Exams.findAll({
-    where: { fkSchoolId: user.schoolId, fkClassId: student.fkClassId },
+    where: { fkSchoolId: user.schoolId },
     include: [{
       model: MarkSheets,
       as: "sheets",
-      where: { status: SHEET_STATUS.PUBLISHED },
+      where: { status: SHEET_STATUS.PUBLISHED, fkClassId: student.fkClassId },
       required: true,
       include: [
         { model: Subjects, as: "subject", attributes: ["id", "name"] },
@@ -501,12 +514,18 @@ async function parentResults(user, studentId) {
   return { student: { id: student.id, name: `${student.firstName} ${student.lastName}` }, exams: out };
 }
 
+/** Every class an exam covers: its papers' classes plus the exam's own class. */
+async function examClassIds(exam) {
+  const sheets = await MarkSheets.findAll({ where: { fkExamId: exam.id }, attributes: ["fkClassId"] });
+  return [...new Set([exam.fkClassId, ...sheets.map((sheet) => sheet.fkClassId)].filter(Boolean))];
+}
+
 /** Staff view of who can / cannot see an exam's results and why. */
 async function gateStatus(user, examId) {
   const exam = await Exams.findOne({ where: { id: examId, fkSchoolId: user.schoolId }, include: [{ model: MarkSheets, as: "sheets", attributes: ["id", "status"] }] });
   if (!exam) throw new ApiError(404, "Exam not found");
   const { feeRule } = await settingsService.get(user.schoolId, SETTING_KEYS.RESULT_VISIBILITY);
-  const students = await Students.findAll({ where: { fkClassId: exam.fkClassId, fkSchoolId: user.schoolId }, attributes: ["id", "firstName", "lastName", "admissionNo"], order: [["firstName", "ASC"]] });
+  const students = await Students.findAll({ where: { fkClassId: await examClassIds(exam), fkSchoolId: user.schoolId }, attributes: ["id", "firstName", "lastName", "admissionNo"], order: [["firstName", "ASC"]] });
   const published = exam.sheets.filter((s) => s.status === SHEET_STATUS.PUBLISHED).length;
   const rows = [];
   for (const s of students) {
@@ -524,37 +543,54 @@ async function gateStatus(user, examId) {
 async function grantOverride(actor, examId, { studentId, reason }) {
   const exam = await Exams.findOne({ where: { id: examId, fkSchoolId: actor.schoolId } });
   if (!exam) throw new ApiError(404, "Exam not found");
-  const student = await Students.findOne({ where: { id: studentId, fkClassId: exam.fkClassId, fkSchoolId: actor.schoolId } });
+  const student = await Students.findOne({ where: { id: studentId, fkClassId: await examClassIds(exam), fkSchoolId: actor.schoolId } });
   if (!student) throw new ApiError(404, "Student is not in this exam's class");
   // D9: a reason is always required (SRS addendum §8 leaves it to the school; the school requires it).
   if (String(reason || "").trim().length < 3) throw new ApiError(400, "A reason is required for an override.");
   if (await activeOverride(exam.id, student.id)) throw new ApiError(409, "An override is already active for this student.");
-  const override = await ResultVisibilityOverrides.create({
-    fkSchoolId: actor.schoolId,
-    fkExamId: exam.id,
-    fkStudentId: student.id,
-    reason: String(reason).trim(),
-    fkGrantedByUserId: actor.id,
-    grantedAt: new Date(),
+  return sequelize.transaction(async (transaction) => {
+    const override = await ResultVisibilityOverrides.create(
+      {
+        fkSchoolId: actor.schoolId,
+        fkExamId: exam.id,
+        fkStudentId: student.id,
+        reason: String(reason).trim(),
+        fkGrantedByUserId: actor.id,
+        grantedAt: new Date(),
+      },
+      { transaction },
+    );
+    await auditService.record(
+      actor,
+      `released ${exam.name} result for ${student.firstName} ${student.lastName} despite fees`,
+      {
+        entityType: "result_visibility_override",
+        entityId: override.id,
+        metadata: { examId: exam.id, studentId: student.id, reason: override.reason, grantedAt: override.grantedAt },
+      },
+      { transaction },
+    );
+    return override;
   });
-  await auditService.record(actor, `released ${exam.name} result for ${student.firstName} ${student.lastName} despite fees`, {
-    entityType: "result_visibility_override",
-    entityId: override.id,
-    metadata: { examId: exam.id, studentId: student.id, reason: override.reason, grantedAt: override.grantedAt },
-  });
-  return override;
 }
 
 async function revokeOverride(actor, overrideId) {
   const override = await ResultVisibilityOverrides.findOne({ where: { id: overrideId, fkSchoolId: actor.schoolId, revokedAt: null } });
   if (!override) throw new ApiError(404, "Active override not found");
-  await override.update({ revokedAt: new Date(), fkRevokedByUserId: actor.id });
-  await auditService.record(actor, `revoked result override #${override.id}`, {
-    entityType: "result_visibility_override",
-    entityId: override.id,
-    metadata: { examId: override.fkExamId, studentId: override.fkStudentId },
+  return sequelize.transaction(async (transaction) => {
+    await override.update({ revokedAt: new Date(), fkRevokedByUserId: actor.id }, { transaction });
+    await auditService.record(
+      actor,
+      `revoked result override #${override.id}`,
+      {
+        entityType: "result_visibility_override",
+        entityId: override.id,
+        metadata: { examId: override.fkExamId, studentId: override.fkStudentId },
+      },
+      { transaction },
+    );
+    return override;
   });
-  return override;
 }
 
 async function listOverrides(user, { examId } = {}) {
@@ -572,11 +608,17 @@ async function listOverrides(user, { examId } = {}) {
 }
 
 /** Letter grade from the percentage; a failed result is always F, a pass never is. */
-function gradeFor(percent, passed) {
+function gradeFor(percent, passed, bands = GRADE_BANDS) {
   if (percent == null) return null;
   if (!passed) return FAIL_GRADE;
-  const band = GRADE_BANDS.find((item) => percent >= item.min);
-  return band ? band.grade : GRADE_BANDS[GRADE_BANDS.length - 1].grade;
+  const band = bands.find((item) => percent >= item.min);
+  return band ? band.grade : bands[bands.length - 1].grade;
+}
+
+/** The school's grade bands (Settings → Grading scale), highest first. */
+async function gradeBands(schoolId) {
+  const { bands } = await settingsService.get(schoolId, SETTING_KEYS.GRADING);
+  return [...bands].sort((a, b) => b.min - a.min);
 }
 
 function percentOf(obtained, total) {
@@ -600,7 +642,7 @@ function paperOutcome(sheet, row) {
 }
 
 /** Combine paper outcomes: pass only if every counted paper is passed. */
-function overallOutcome(papers) {
+function overallOutcome(papers, bands = GRADE_BANDS) {
   const counted = papers.filter((paper) => paper.status !== "Exempt");
   const obtained = counted.reduce((sum, paper) => sum + (paper.obtained || 0), 0);
   const total = counted.reduce((sum, paper) => sum + paper.total, 0);
@@ -618,7 +660,7 @@ function overallOutcome(papers) {
     failedPapers,
     result,
     passed: result === "Pass",
-    grade: percentage == null ? null : gradeFor(percentage, result === "Pass"),
+    grade: percentage == null ? null : gradeFor(percentage, result === "Pass", bands),
   };
 }
 
@@ -659,7 +701,8 @@ async function dmc(user, examId, studentId) {
   if (!sheets.length) throw new ApiError(404, isParent ? "No published result for this student" : "This student has no papers in this exam.");
   sheets.sort((a, b) => String(a.subject ? a.subject.name : "").localeCompare(String(b.subject ? b.subject.name : "")));
   const papers = sheets.map((sheet) => paperOutcome(sheet, sheet.rows[0]));
-  const overall = overallOutcome(papers);
+  const bands = await gradeBands(user.schoolId);
+  const overall = overallOutcome(papers, bands);
   const standing = await buildResults(user, examId, { classId: student.fkClassId, publishedOnly: isParent });
   const own = standing.rows.find((row) => row.studentId === student.id);
   const profile = await Students.findOne({
@@ -689,7 +732,7 @@ async function dmc(user, examId, studentId) {
       absent: paper.status === "Absent",
       exempt: paper.status === "Exempt",
       result: paper.status,
-      grade: paper.obtained == null || paper.status === "Absent" ? null : gradeFor(percentOf(paper.obtained, paper.total), paper.status === "Pass"),
+      grade: paper.obtained == null || paper.status === "Absent" ? null : gradeFor(percentOf(paper.obtained, paper.total), paper.status === "Pass", bands),
     })),
     total: overall.obtained,
     max: overall.total,
@@ -1036,6 +1079,7 @@ async function buildResults(user, examId, { classId, subjectId, publishedOnly = 
   if (!sheets.length) throw new ApiError(404, "No mark sheet matches that exam, class, and subject.");
   sheets.sort((a, b) => String(a.subject ? a.subject.name : "").localeCompare(String(b.subject ? b.subject.name : "")));
   const { feeRule, rankTie } = await settingsService.get(user.schoolId, SETTING_KEYS.RESULT_VISIBILITY);
+  const bands = await gradeBands(user.schoolId);
 
   const students = new Map();
   for (const sheet of sheets) {
@@ -1050,7 +1094,7 @@ async function buildResults(user, examId, { classId, subjectId, publishedOnly = 
       name: `${student.firstName} ${student.lastName}`.trim(),
       admissionNo: student.admissionNo,
       papers,
-      ...overallOutcome(papers),
+      ...overallOutcome(papers, bands),
     };
   });
   const ranks = rankValue(rows, (row) => (row.result === "Pending" || row.result === "Exempt" ? null : row.percentage), rankTie || "shared");
@@ -1073,7 +1117,7 @@ async function buildResults(user, examId, { classId, subjectId, publishedOnly = 
         subjectId: paper.subjectId,
         obtained: paper.obtained,
         status: paper.status,
-        grade: paper.obtained == null || paper.status === "Absent" ? null : gradeFor(percentOf(paper.obtained, paper.total), paper.status === "Pass"),
+        grade: paper.obtained == null || paper.status === "Absent" ? null : gradeFor(percentOf(paper.obtained, paper.total), paper.status === "Pass", bands),
       })),
       classRank: ranks.get(index) ?? null,
       visibility: published && gate.visible ? (gate.overridden && !gate.feeCleared ? "override" : "visible") : gate.overridden ? "override" : "hidden",
@@ -1156,7 +1200,10 @@ async function advance(actor, examId) {
 async function grantBulkOverrides(actor, examId, { classId, reason }) {
   const exam = await Exams.findOne({ where: { id: examId, fkSchoolId: actor.schoolId } });
   if (!exam) throw new ApiError(404, "Exam not found");
-  const where = { fkSchoolId: actor.schoolId, fkClassId: classId || exam.fkClassId, status: STUDENT_STATUS.ACTIVE };
+  const covered = await examClassIds(exam);
+  const targetClassId = Number(classId || exam.fkClassId);
+  if (!covered.includes(targetClassId)) throw new ApiError(400, "That class does not sit this exam.");
+  const where = { fkSchoolId: actor.schoolId, fkClassId: targetClassId, status: STUDENT_STATUS.ACTIVE };
   const students = await Students.findAll({ where, attributes: ["id"] });
   const { feeRule } = await settingsService.get(actor.schoolId, SETTING_KEYS.RESULT_VISIBILITY);
   let granted = 0;

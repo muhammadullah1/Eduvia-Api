@@ -16,7 +16,7 @@ const credit = require("../../services/credit_ledger.service");
 const { FEE_TYPE_FREQUENCY } = require("../../constants/finance");
 
 const formClass = (schoolId, sessionId, label, fee = 1000) =>
-  classService.create(schoolId, { fkSessionId: sessionId, grade: label, section: "A", label, monthlyTuitionFee: fee, capacity: 30 });
+  classService.create(schoolId, { fkSessionId: sessionId, grade: label, section: "A", label, monthlyFee: fee, capacity: 30 });
 const call = (token, method, path, body) => request(app, { method, path: `/api${path}`, token, body });
 
 /** Seed structure rows directly (session lock blocks mid-session API writes). */

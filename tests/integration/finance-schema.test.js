@@ -21,7 +21,6 @@ beforeAll(async () => {
   ({ school, session } = await makeSchool());
   admin = await makeUser(school.id, "super_admin");
   klass = await makeClass(school.id, session.id);
-  await klass.update({ monthlyTuitionFee: 4500 });
   student = await makeStudent(school.id, klass.id);
 });
 
@@ -142,12 +141,12 @@ describe("migration 062 other income, expense payment method, DECIMAL(12,2)", ()
   test("all fee money columns are NUMERIC(12,2)", async () => {
     const rows = await sequelize.query(
       `SELECT table_name || '.' || column_name AS col, numeric_precision AS p, numeric_scale AS s FROM information_schema.columns
-       WHERE table_schema = 'public' AND (table_name, column_name) IN (('classes','monthly_tuition_fee'),('students','fixed_monthly_fee'),('expenses','amount'),
+       WHERE table_schema = 'public' AND (table_name, column_name) IN (('students','fixed_monthly_fee'),('expenses','amount'),
          ('fee_payments','amount_paid'),('fee_payments','unallocated_amount'),('fee_allocations','allocated_amount'),('student_fee_months','base_amount'),
          ('student_fee_months','discount_amount'),('student_fee_months','net_amount'),('student_fee_months','paid_amount'))`,
       { type: sequelize.QueryTypes.SELECT },
     );
-    expect(rows).toHaveLength(10);
+    expect(rows).toHaveLength(9);
     for (const r of rows) expect([r.col, r.p, r.s]).toEqual([r.col, 12, 2]);
   });
 });

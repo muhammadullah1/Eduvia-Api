@@ -520,4 +520,4 @@ async function build(actor, kind, filters = {}) {
   return BUILDERS[kind](actor, filters);
 }
 
-module.exports = { REPORT_KINDS, kindsFor, build };
+module.exports = { REPORT_KINDS, kindsFor, build, classLabel, fullName, day, monthLabel };

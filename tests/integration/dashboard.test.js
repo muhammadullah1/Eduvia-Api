@@ -30,7 +30,7 @@ describe("staff dashboard", () => {
       teacher: await makeUser(school.id, "teacher"),
     };
     const klass = await makeClass(school.id, session.id, "Dash A", 1500);
-    await Classes.create({ fkSchoolId: school.id, fkSessionId: session.id, grade: "Dash B", section: "A", label: "Dash B", monthlyTuitionFee: 0, capacity: 30 });
+    await Classes.create({ fkSchoolId: school.id, fkSessionId: session.id, grade: "Dash B", section: "A", label: "Dash B", capacity: 30 });
     const s1 = await makeStudent(school.id, klass.id, { firstName: "Ayesha" });
     const s2 = await makeStudent(school.id, klass.id, { firstName: "Bilal" });
     users.parent = await makeParent(school.id, s1.id);
@@ -67,6 +67,8 @@ describe("staff dashboard", () => {
     expect(widgets.finance).toMatchObject({ collected: a.paid, expected: 3000, paidAgainstBills: 1500, collectionRate: 50, outstanding: a.owed });
     expect(widgets.finance.byMethod).toEqual([{ method: "Cash", amount: a.paid, receipts: 1 }]);
     expect(widgets.finance.defaulterClasses).toEqual([expect.objectContaining({ label: "Dash A", students: 1, amount: a.owed })]);
+    expect(widgets.finance.defaulterStudents).toEqual([expect.objectContaining({ studentId: a.s2.id, name: expect.stringContaining("Bilal"), classLabel: "Dash A", months: expect.any(Number), amount: a.owed })]);
+    expect(widgets.finance.advanceCredit).toEqual({ students: 0, amount: 0 });
     expect(widgets.finance.recentPayments).toHaveLength(1);
     expect(widgets.alerts.classesWithoutFeeStructure.map((c) => c.label)).toEqual(["Dash B"]);
     const rep = await call(a.tok.admin, `/finance/report?period=${MONTH}`);
@@ -79,7 +81,7 @@ describe("staff dashboard", () => {
     const { widgets } = res.body.data;
     expect(widgets.finance).toBeUndefined();
     expect(widgets.incomeVsExpenses).toBeUndefined();
-    expect(widgets.attendance.trend).toEqual([{ date: today(), percent: 50 }]);
+    expect(widgets.attendance.trend).toEqual([{ date: today(), percent: 50, absent: 1 }]);
     expect(widgets.feeStatus).toMatchObject({ month: MONTH, cleared: 1, notCleared: 1 });
     expect(JSON.stringify(widgets)).not.toMatch(MONEY_KEYS);
   });
@@ -117,6 +119,22 @@ describe("staff dashboard", () => {
     await roleService.updatePermissions(await actorFor(a.users.admin), role.id, { permissions: keep, reason: "Dashboard redaction check", version: role.version });
     const after = await dashboardService.dashboard(await actorFor(a.users.ops));
     expect(after.widgets.feeStatus).toBeUndefined();
+  });
+
+  test("session, month, week and day presets cover today's payment; redaction is unchanged", async () => {
+    for (const preset of ["day", "week", "month", "session"]) {
+      const res = await call(a.tok.admin, `/dashboard?period=${preset}`);
+      expect(res.status).toBe(200);
+      const { period, widgets } = res.body.data;
+      expect(period.kind).toBe(preset);
+      expect(period.from <= today() && today() < period.to).toBe(true);
+      expect(widgets.finance.collected).toBe(a.paid);
+      expect(widgets.incomeVsExpenses.income).toBe(a.paid);
+    }
+    const ops = await call(a.tok.ops, "/dashboard?period=week");
+    expect(ops.status).toBe(200);
+    expect(JSON.stringify(ops.body.data.widgets)).not.toMatch(MONEY_KEYS);
+    expect((await call(a.tok.admin, "/dashboard?period=year")).status).toBe(400);
   });
 
   test("an invalid period is rejected", async () => {

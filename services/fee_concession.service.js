@@ -1,6 +1,6 @@
 "use strict";
 
-const { Op } = require("sequelize");
+const { Op, QueryTypes } = require("sequelize");
 const {
   StudentFeeConcessions,
   StudentFeeConcessionEvents,
@@ -86,7 +86,8 @@ function needsApproval(policy, mode, value) {
   const rule = policy.approvalRule || "none";
   if (rule === "always") return true;
   if (rule === "none") return false;
-  if (mode === "waiver") return true;
+  // Waivers and fixed-payable amounts have no fixed size, so they always need approval here.
+  if (mode === "waiver" || mode === "fixed_payable") return true;
   if (mode === "percent") {
     if (policy.approvalPercentAbove == null) return false;
     return Number(value) > Number(policy.approvalPercentAbove);
@@ -148,6 +149,28 @@ async function sessionForStudent(schoolId, student, bodySessionId, transaction) 
  * Upsert-style assign: creates Approved or PendingApproval; supersedes any
  * previous Approved row for the same student + fee type.
  */
+/**
+ * A reason flagged `requiresFamily` (e.g. Sibling) needs the student to be an active
+ * member of a verified family that has at least one other active student.
+ */
+async function verifiedFamilyOf(schoolId, studentId, reasonLabel, transaction) {
+  const [row] = await sequelize.query(
+    `SELECT f.id FROM family_members m
+       JOIN families f ON f.id = m.fk_family_id AND f.fk_school_id = :schoolId
+        AND f.archived_at IS NULL AND f.verified_at IS NOT NULL
+      WHERE m.fk_student_id = :studentId AND m.status = 'Active'
+        AND EXISTS (SELECT 1 FROM family_members o JOIN students s ON s.id = o.fk_student_id
+                     WHERE o.fk_family_id = f.id AND o.fk_student_id <> :studentId
+                       AND o.status = 'Active' AND s.status = 'Active' AND s.archived_at IS NULL)
+      ORDER BY f.id LIMIT 1`,
+    { replacements: { schoolId, studentId }, type: QueryTypes.SELECT, transaction },
+  );
+  if (!row) {
+    throw new ApiError(409, `A ${reasonLabel} concession needs the student in a verified family with another active student.`);
+  }
+  return row.id;
+}
+
 async function assign(actor, body) {
   return sequelize.transaction(async (transaction) => {
     const student = await assertStudent(actor.schoolId, body.studentId, transaction);
@@ -165,27 +188,32 @@ async function assign(actor, body) {
 
     let value = Number(body.value) || 0;
     if (mode === "waiver") value = 0;
-    if (mode === "percent" && (value < 0 || value > 100)) {
-      throw new ApiError(400, "Percent must be between 0 and 100");
+    if (mode === "percent" && (value <= 0 || value > 100)) {
+      throw new ApiError(400, "Percent must be more than 0 and at most 100");
     }
-    if (mode === "fixed_discount" && value < 0) {
-      throw new ApiError(400, "Discount amount must be 0 or more");
+    if (mode === "fixed_discount" && value <= 0) {
+      throw new ApiError(400, "Discount amount must be more than 0");
+    }
+    if (mode === "fixed_payable" && value < 0) {
+      throw new ApiError(400, "Payable amount must be 0 or more");
     }
 
     let reasonId = null;
     let reasonLabel = null;
-    if (body.reasonId) {
-      const reason = await SchoolConcessionReasons.findOne({
-        where: {
-          id: body.reasonId,
-          fkSchoolId: actor.schoolId,
-          active: true,
-        },
-        transaction,
-      });
-      if (!reason) throw new ApiError(404, "Concession reason not found");
+    let familyId = null;
+    // A typed label that matches a configured reason is that reason, so its rules still apply.
+    let reasonWhere = null;
+    if (body.reasonId) reasonWhere = { id: body.reasonId };
+    else if (body.reasonLabel) reasonWhere = { label: { [Op.iLike]: String(body.reasonLabel).trim() } };
+    const reason = reasonWhere && await SchoolConcessionReasons.findOne({
+      where: { ...reasonWhere, fkSchoolId: actor.schoolId, active: true },
+      transaction,
+    });
+    if (body.reasonId && !reason) throw new ApiError(404, "Concession reason not found");
+    if (reason) {
       reasonId = reason.id;
       reasonLabel = reason.label;
+      if (reason.requiresFamily) familyId = await verifiedFamilyOf(actor.schoolId, student.id, reasonLabel, transaction);
     } else if (body.reasonLabel) {
       reasonLabel = String(body.reasonLabel).trim();
     }
@@ -209,16 +237,24 @@ async function assign(actor, body) {
     const pending = needsApproval(policy, mode, value);
     const status = pending ? "PendingApproval" : "Approved";
 
-    const previous = await StudentFeeConcessions.findOne({
+    const open = await StudentFeeConcessions.findAll({
       where: {
         fkSchoolId: actor.schoolId,
         fkStudentId: student.id,
         feeType,
-        status: "Approved",
+        status: { [Op.in]: ["Approved", "PendingApproval"] },
       },
       transaction,
       lock: transaction.LOCK.UPDATE,
     });
+    if (open.some((row) => row.status === "PendingApproval")) {
+      throw new ApiError(409, `This student already has a ${feeType} concession waiting for approval. Approve or reject it first.`);
+    }
+    // Concessions never stack: a new one only replaces the approved one when asked to.
+    const previous = open.find((row) => row.status === "Approved");
+    if (previous && body.replaceExisting !== true) {
+      throw new ApiError(409, `This student already has an approved ${feeType} concession. Choose "Replace" to supersede it.`);
+    }
 
     let replacesId = null;
     if (previous && !pending) {
@@ -241,6 +277,7 @@ async function assign(actor, body) {
         fkSessionId: session.id,
         fkStudentId: student.id,
         fkReasonId: reasonId,
+        fkFamilyId: familyId,
         fkReplacesId: replacesId,
         feeType,
         category: "Standard",
@@ -284,6 +321,10 @@ async function approve(actor, id) {
     const row = await load(actor.schoolId, id, transaction);
     if (row.status !== "PendingApproval") {
       throw new ApiError(400, "Only pending concessions can be approved");
+    }
+    // Family membership can change while a request waits, so check it again.
+    if (row.reasonRow && row.reasonRow.requiresFamily) {
+      await verifiedFamilyOf(actor.schoolId, row.fkStudentId, row.reasonRow.label, transaction);
     }
 
     const previous = await StudentFeeConcessions.findOne({

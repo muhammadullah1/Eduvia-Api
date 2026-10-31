@@ -237,4 +237,60 @@ describe("Settings API integration", () => {
       expect(getRes.body.data.fees.dueDay).toBe(18);
     });
   });
+
+  describe("grading scale and receipt template", () => {
+    const bands = [
+      { min: 85, grade: "A" },
+      { min: 65, grade: "B" },
+      { min: 0, grade: "C" },
+    ];
+
+    it("saves a custom grading scale that exams then use", async () => {
+      const res = await call(tok.admin, "PUT", "/settings/grading", { bands });
+      expect(res.status).toBe(200);
+      const examService = require("../../services/exam.service");
+      const saved = (await call(tok.admin, "GET", "/settings")).body.data.grading.bands;
+      expect(examService.gradeFor(70, true, saved)).toBe("B");
+      expect(examService.gradeFor(70, false, saved)).toBe("F");
+    });
+
+    it("rejects a scale without a 0% band, duplicate grades, or the fail grade", async () => {
+      expect((await call(tok.admin, "PUT", "/settings/grading", { bands: [{ min: 50, grade: "A" }, { min: 40, grade: "B" }] })).status).toBe(400);
+      expect((await call(tok.admin, "PUT", "/settings/grading", { bands: [{ min: 50, grade: "A" }, { min: 0, grade: "a" }] })).status).toBe(400);
+      expect((await call(tok.admin, "PUT", "/settings/grading", { bands: [{ min: 50, grade: "A" }, { min: 0, grade: "F" }] })).status).toBe(400);
+    });
+
+    it("keeps the grading scale for academic editors and the receipt for fee editors", async () => {
+      expect((await call(tok.teacher, "PUT", "/settings/grading", { bands })).status).toBe(403);
+      expect((await call(tok.teacher, "PUT", "/settings/receipt", { footerNote: "x" })).status).toBe(403);
+    });
+
+    it("saves the receipt template and validates its length", async () => {
+      const res = await call(tok.admin, "PUT", "/settings/receipt", { footerNote: "Fees once paid are not refundable.", showSignatureLine: false });
+      expect(res.status).toBe(200);
+      const all = (await call(tok.admin, "GET", "/settings")).body.data;
+      expect(all.receipt).toEqual({ footerNote: "Fees once paid are not refundable.", showSignatureLine: false });
+      expect((await call(tok.admin, "PUT", "/settings/receipt", { footerNote: "x".repeat(301) })).status).toBe(400);
+    });
+  });
+
+  describe("school profile", () => {
+    it("lets the Super Admin edit the profile, audits it and refuses bad values", async () => {
+      const res = await call(tok.admin, "PATCH", "/schools/current", { name: "Renamed School", phone: "+92 300 1234567", website: "https://example.edu.pk" });
+      expect(res.status).toBe(200);
+      expect(res.body.data.name).toBe("Renamed School");
+      const audit = await AuditLogs.findOne({ where: { fkSchoolId: school.id, entityType: "school" }, order: [["id", "DESC"]] });
+      expect(audit.metadata.after.name).toBe("Renamed School");
+      expect((await call(tok.admin, "PATCH", "/schools/current", { website: "example" })).status).toBe(400);
+      expect((await call(tok.admin, "PATCH", "/schools/current", { phone: "call me" })).status).toBe(400);
+      expect((await call(tok.admin, "PATCH", "/schools/current", { name: "X" })).status).toBe(400);
+      const other = await makeSchool();
+      expect((await call(tok.admin, "PATCH", "/schools/current", { email: other.school.email })).status).toBe(409);
+    });
+
+    it("refuses roles without school.update", async () => {
+      expect((await call(tok.acc, "PATCH", "/schools/current", { name: "Nope School" })).status).toBe(403);
+      expect((await call(tok.teacher, "PATCH", "/schools/current", { name: "Nope School" })).status).toBe(403);
+    });
+  });
 });

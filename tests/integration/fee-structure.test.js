@@ -6,14 +6,14 @@
  * Billing still honours historical effective_from rows already stored.
  */
 const app = require("../../app");
-const { sequelize, Classes, FeeStructures, StudentFeeMonths, AuditLogs, AcademicSessions } = require("../../models");
+const { sequelize, FeeStructures, StudentFeeMonths, AuditLogs, AcademicSessions } = require("../../models");
 const { makeSchool, makeUser, tokenFor, makeClass, makeStudent } = require("../helpers/school");
 const { request } = require("../helpers/http");
 const feeService = require("../../services/fee.service");
 const classService = require("../../services/class.service");
 
 const formClass = (schoolId, sessionId, label, fee = 1000) =>
-  classService.create(schoolId, { fkSessionId: sessionId, grade: label, section: "A", label, monthlyTuitionFee: fee, capacity: 30 });
+  classService.create(schoolId, { fkSessionId: sessionId, grade: label, section: "A", label, monthlyFee: fee, capacity: 30 });
 
 const call = (token, method, path, body) => request(app, { method, path: `/api${path}`, token, body });
 
@@ -115,7 +115,6 @@ describe("fee structure API", () => {
 
   test("a missing or zero tuition structure does not bill a school fallback", async () => {
     const zero = await makeClass(school.id, currentSession.id, "Zero fee");
-    await Classes.update({ monthlyTuitionFee: 0 }, { where: { id: zero.id }, hooks: false });
     await FeeStructures.destroy({ where: { fkClassId: zero.id, feeType: "Tuition" } });
     await FeeStructures.create({
       fkSchoolId: school.id,

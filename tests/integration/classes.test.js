@@ -2,6 +2,7 @@
 
 const classService = require("../../services/class.service");
 const studentService = require("../../services/student.service");
+const { tuitionForMonth } = require("../../services/fee_structure.service");
 const { sequelize, Schools, AcademicSessions, Classes } = require("../../models");
 
 async function buildFixture() {
@@ -65,12 +66,12 @@ describe("class service", () => {
     expect(created.label).toBe("Class 1 · Blue");
     expect(created.room).toBe("B-12");
     expect(Number(created.periodCount)).toBe(9);
-    expect(Number(created.monthlyTuitionFee)).toBe(8800);
+    expect(Number(created.monthlyFee)).toBe(8800);
 
     const row = await Classes.findByPk(created.id);
     expect(row).toBeTruthy();
     expect(row.fkSchoolId).toBe(fx.school.id);
-    expect(Number(row.monthlyTuitionFee)).toBe(8800);
+    expect(await tuitionForMonth(created.id, fx.session.startDate)).toBe(8800);
   });
 
   test("update patches fields", async () => {
@@ -89,7 +90,7 @@ describe("class service", () => {
       room: "C-02",
     });
     expect(updated.room).toBe("C-02");
-    expect(Number(updated.monthlyTuitionFee)).toBe(8000);
+    expect(Number(updated.monthlyFee)).toBe(8000);
     // Tuition already bootstrapped; session lock blocks further amount changes.
     await expect(
       classService.update(created.id, fx.school.id, { monthlyFee: 8200 }),
@@ -127,7 +128,7 @@ describe("class service", () => {
       monthlyFee: 8200,
     });
     expect(updated.room).toBe("C-02");
-    expect(Number(updated.monthlyTuitionFee)).toBe(8200);
+    expect(Number(updated.monthlyFee)).toBe(8200);
   });
 
   test("remove soft-deletes class", async () => {

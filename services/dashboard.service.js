@@ -11,15 +11,17 @@ const { USER_ROLES, STUDENT_STATUS, SHEET_STATUS } = require("../constants");
 const { attendancePercent } = require("../utils/attendance");
 const { today } = require("../utils/dates");
 const ApiError = require("../utils/ApiError");
-const { parsePeriod, currentPeriods, shortMonth } = require("../utils/finance_period");
+const { currentPeriods, shortMonth } = require("../utils/finance_period");
+const { parseDashboardPeriod } = require("../utils/dashboard_period");
+const { AcademicSessions } = require("../models");
 const { hasPermission } = require("./permission.service");
 const feeService = require("./fee.service");
-const financeService = require("./finance.service");
 const L = require("./finance_ledger");
 
 const CACHE_MS = 30 * 1000;
 const TREND_DAYS = 7;
 const TOP_DEFAULTER_CLASSES = 5;
+const TOP_DEFAULTER_STUDENTS = 5;
 const RECENT_PAYMENTS = 5;
 const RECENT_IMPORTS = 5;
 const PORTAL_ROLES = new Set([USER_ROLES.TEACHER, USER_ROLES.PARENT]);
@@ -73,7 +75,10 @@ async function attendance(schoolId, day) {
       leave: fullCount(todays, "Leave"),
       percent: attendanceOf(todays),
     },
-    trend: days.map((d) => ({ date: d, percent: attendanceOf(rows.filter((row) => row.day === d)) })),
+    trend: days.map((d) => {
+      const dayRows = rows.filter((row) => row.day === d);
+      return { date: d, percent: attendanceOf(dayRows), absent: fullCount(dayRows, "Absent") };
+    }),
   };
 }
 
@@ -132,7 +137,7 @@ async function feeStatus(schoolId, month) {
 async function finance(actor, period, month) {
   const schoolId = actor.schoolId;
   const chartFrom = `${period.chartMonths.at(0)}-01`;
-  const [byMonth, billed, outstanding, methods, defaulters, recent] = await Promise.all([
+  const [byMonth, billed, outstanding, methods, defaulters, recent, students, credit] = await Promise.all([
     L.feeIncomeByMonth(schoolId, chartFrom, period.to),
     L.query(
       `SELECT COALESCE(SUM(COALESCE(collectible_amount, net_amount)), 0) AS expected, COALESCE(SUM(paid_amount), 0) AS paid
@@ -167,8 +172,26 @@ async function finance(actor, period, month) {
         WHERE ${L.FEE_INCOME_WHERE} ORDER BY p.payment_date DESC, p.id DESC LIMIT :limit`,
       { schoolId, limit: RECENT_PAYMENTS },
     ),
+    L.query(
+      `SELECT s.id, s.first_name, s.last_name, c.label AS class_label, COUNT(*)::int AS months,
+              SUM(GREATEST(COALESCE(m.collectible_amount, m.net_amount) - m.paid_amount, 0)) AS amount
+         FROM student_fee_months m
+         JOIN students s ON s.id = m.fk_student_id
+         LEFT JOIN classes c ON c.id = s.fk_class_id
+        WHERE m.fk_school_id = :schoolId AND m.archived_at IS NULL AND m.month <= :month
+          AND COALESCE(m.collectible_amount, m.net_amount) > m.paid_amount
+        GROUP BY 1, 2, 3, 4 ORDER BY 6 DESC, 1 LIMIT :limit`,
+      { schoolId, month, limit: TOP_DEFAULTER_STUDENTS },
+    ),
+    L.query(
+      `SELECT COUNT(*)::int AS students, COALESCE(SUM(balance), 0) AS amount FROM (
+         SELECT fk_student_id, SUM(CASE WHEN entry_type = 'Credit' THEN amount ELSE -amount END) AS balance
+           FROM student_credit_ledger WHERE fk_school_id = :schoolId GROUP BY 1) b
+        WHERE balance > 0`,
+      { schoolId },
+    ),
   ]);
-  const collected = period.months.reduce((sum, m) => sum + L.cents(byMonth[m]?.amount), 0);
+  const collected = methods.reduce((sum, row) => sum + L.cents(row.amount), 0);
   const bills = billed.at(0);
   const expected = L.cents(bills.expected);
   return {
@@ -180,6 +203,14 @@ async function finance(actor, period, month) {
     trend: period.chartMonths.map((m) => ({ month: m, label: shortMonth(m), amount: L.fromCents(L.cents(byMonth[m]?.amount)) })),
     byMethod: methods.map((row) => ({ method: row.method, amount: Number(row.amount), receipts: row.receipts })),
     defaulterClasses: defaulters.map((row) => ({ classId: row.id, label: row.label, students: row.students, amount: Number(row.amount) })),
+    defaulterStudents: students.map((row) => ({
+      studentId: row.id,
+      name: L.fullName(row.first_name, row.last_name),
+      classLabel: row.class_label,
+      months: row.months,
+      amount: Number(row.amount),
+    })),
+    advanceCredit: { students: credit.at(0).students, amount: L.fromCents(L.cents(credit.at(0).amount)) },
     recentPayments: recent.map((row) => ({
       id: row.id,
       receiptNo: row.receipt_no,
@@ -192,9 +223,18 @@ async function finance(actor, period, month) {
   };
 }
 
+/** Same basis as the Finance report (confirmed fee payments + other income - expenses), over the dashboard's date range. */
 async function incomeVsExpenses(actor, period) {
-  const report = await financeService.report(actor, { period: period.key });
-  return { income: report.totals.income, expenses: report.totals.expenses, net: report.totals.net };
+  const schoolId = actor.schoolId;
+  const [fee, other, spent] = await Promise.all([
+    L.feeIncomeByMonth(schoolId, period.from, period.to),
+    L.enteredByMonth("other_incomes", "income_date", schoolId, period.from, period.to),
+    L.enteredByMonth("expenses", "expense_date", schoolId, period.from, period.to),
+  ]);
+  const sumCents = (rows) => rows.reduce((s, r) => s + L.cents(r.amount), 0);
+  const income = sumCents(Object.values(fee)) + sumCents(other);
+  const expenses = sumCents(spent);
+  return { income: L.fromCents(income), expenses: L.fromCents(expenses), net: L.fromCents(income - expenses) };
 }
 
 async function alerts(schoolId) {
@@ -271,10 +311,11 @@ async function build(actor, period) {
   return { period: { key: period.key, kind: period.kind, label: period.label, from: period.from, to: period.to }, today: day, widgets, generatedAt: new Date().toISOString() };
 }
 
-/** GET /dashboard?period=YYYY-MM | YYYY-Qn | FYyyyy, cached briefly per school, user and period. */
+/** GET /dashboard?period=session | month | week | day (or a Finance key YYYY-MM | YYYY-Qn | FYyyyy), cached briefly per school, user and period. */
 async function dashboard(actor, { period } = {}) {
   if (PORTAL_ROLES.has(actor.role)) throw new ApiError(403, "Teachers and parents use their own portal home page.");
-  const parsed = parsePeriod(period || currentPeriods().month);
+  const session = await AcademicSessions.findOne({ where: { fkSchoolId: actor.schoolId, isCurrent: true }, attributes: ["name", "startDate", "endDate"] });
+  const parsed = parseDashboardPeriod(period || "month", { session });
   const grants = [...actor.permissions].sort().join(",");
   const key = `${actor.schoolId}:${actor.id}:${parsed.key}:${grants}`;
   const hit = cache.get(key);

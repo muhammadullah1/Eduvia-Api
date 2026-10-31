@@ -26,7 +26,7 @@ const entries = (studentId) => StudentCreditLedger.findAll({ where: { fkStudentI
 async function fixture(label) {
   const { school, session } = await makeSchool();
   const admin = await makeUser(school.id, "super_admin");
-  const klass = await classService.create(school.id, { fkSessionId: session.id, grade: label, section: "A", label, monthlyTuitionFee: 1000, capacity: 30 });
+  const klass = await classService.create(school.id, { fkSessionId: session.id, grade: label, section: "A", label, monthlyFee: 1000, capacity: 30 });
   const kid = await makeStudent(school.id, klass.id);
   return { school, admin, actor: actorOf(admin, school.id), klass, kid };
 }

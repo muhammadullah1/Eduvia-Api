@@ -17,11 +17,12 @@ function plain(row) {
     defaultValue,
     sortOrder: row.sortOrder,
     active: row.active,
+    requiresFamily: row.requiresFamily,
   };
 }
 
 const SEED = [
-  { label: "Sibling", sortOrder: 10, defaultMode: "percent", defaultValue: 10 },
+  { label: "Sibling", sortOrder: 10, defaultMode: "percent", defaultValue: 10, requiresFamily: true },
   { label: "Staff child", sortOrder: 20, defaultMode: "percent", defaultValue: 50 },
   { label: "Merit", sortOrder: 30, defaultMode: "percent", defaultValue: 25 },
   { label: "Hardship", sortOrder: 40, defaultMode: "fixed_discount", defaultValue: null },
@@ -43,6 +44,7 @@ async function ensureSeeded(schoolId, transaction) {
         defaultValue: row.defaultValue,
         sortOrder: row.sortOrder,
         active: true,
+        requiresFamily: Boolean(row.requiresFamily),
       },
       { transaction },
     );
@@ -98,6 +100,7 @@ async function create(actor, body) {
         defaultValue,
         sortOrder: body.sortOrder != null ? Number(body.sortOrder) : 100,
         active: body.active !== false,
+        requiresFamily: body.requiresFamily === true,
       },
       { transaction },
     );
@@ -152,6 +155,7 @@ async function update(actor, id, body) {
     }
     if (body.sortOrder != null) patch.sortOrder = Number(body.sortOrder);
     if (body.active != null) patch.active = Boolean(body.active);
+    if (body.requiresFamily != null) patch.requiresFamily = Boolean(body.requiresFamily);
 
     await row.update(patch, { transaction });
     await auditService.record(

@@ -62,7 +62,7 @@ async function create(user, data) {
     subjectId: chapter.fkSubjectId,
     date: data.date,
   });
-  return DailyLessons.create({
+  const row = await DailyLessons.create({
     fkSchoolId: user.schoolId,
     fkClassId: chapter.fkClassId,
     fkSubjectId: chapter.fkSubjectId,
@@ -76,6 +76,12 @@ async function create(user, data) {
     reviewStatus: LESSON_REVIEW_STATUS.SUBMITTED,
     fkSubmittedByUserId: user.id,
   });
+  await auditService.record(user, `submitted daily update for ${data.date}`, {
+    entityType: "daily_lesson",
+    entityId: row.id,
+    metadata: { classId: row.fkClassId, subjectId: row.fkSubjectId, plannedChapterId: chapter.id },
+  });
+  return row;
 }
 
 async function update(user, id, data) {
@@ -96,6 +102,11 @@ async function update(user, id, data) {
     Object.assign(changes, { fkPlannedChapterId: chapter.id });
   }
   await row.update(changes);
+  await auditService.record(user, `resubmitted daily update #${row.id}`, {
+    entityType: "daily_lesson",
+    entityId: row.id,
+    metadata: { fields: Object.keys(changes) },
+  });
   return getById(id, user.schoolId);
 }
 

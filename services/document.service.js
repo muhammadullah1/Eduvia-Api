@@ -35,6 +35,8 @@ async function receiptPdf(user, paymentId) {
     `Amount ${receipt.amount}`,
     months ? `Months ${months}` : "",
     receipt.notes || "",
+    receipt.template.footerNote,
+    receipt.template.showSignatureLine ? "Received by ____________________" : "",
   ].filter(Boolean));
 }
 

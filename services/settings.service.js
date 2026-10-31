@@ -13,6 +13,8 @@ const KEY_PERMISSION = {
   [SETTING_KEYS.FEES]: "settings.fees.update",
   [SETTING_KEYS.ADMISSION]: "settings.academic.update",
   [SETTING_KEYS.ATTENDANCE]: "settings.academic.update",
+  [SETTING_KEYS.GRADING]: "settings.academic.update",
+  [SETTING_KEYS.RECEIPT]: "settings.fees.update",
 };
 
 function sanitizeFeesValue(value) {

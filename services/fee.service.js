@@ -851,6 +851,7 @@ async function receipt(user, id, { transaction } = {}) {
   view.creditAppliedTotal = fromCents(applied.reduce((n, m) => n + cents(m.amount), 0));
   view.creditAdded = fromCents(movements.filter((m) => m.entryType === "Credit").reduce((n, m) => n + cents(m.amount), 0));
   view.creditBalance = await creditLedgerService.balance(payment.fkSchoolId, payment.fkStudentId, { transaction });
+  view.template = await settingsService.get(payment.fkSchoolId, SETTING_KEYS.RECEIPT, { transaction });
   return view;
 }
 

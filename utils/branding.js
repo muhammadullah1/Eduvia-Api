@@ -15,6 +15,27 @@
 const fs = require("fs");
 const path = require("path");
 const { Schools, Users } = require("../models");
+const storageService = require("../services/storage.service");
+
+const JPEG_MAGIC = [0xff, 0xd8, 0xff];
+/** Uploaded logos by object key (keys are unique per upload, so entries never go stale). */
+const uploadedLogos = new Map();
+
+/** The school's uploaded JPEG logo, or the default crest when none is set or it can't be read. */
+async function logoFor(objectKey) {
+  if (!storageService.isObjectKey(objectKey) || !storageService.storageConfig()) return crestJpeg();
+  if (uploadedLogos.has(objectKey)) return uploadedLogos.get(objectKey);
+  try {
+    const { url } = await storageService.signedDownloadUrl(objectKey);
+    const res = await fetch(url);
+    const bytes = Buffer.from(await res.arrayBuffer());
+    if (!res.ok || !JPEG_MAGIC.every((byte, i) => bytes[i] === byte)) return crestJpeg();
+    uploadedLogos.set(objectKey, bytes);
+    return bytes;
+  } catch {
+    return crestJpeg();
+  }
+}
 
 /** Hex colours (no "#"), identical to the result documents. */
 const COLORS = Object.freeze({
@@ -55,7 +76,7 @@ function generatedAt(now = new Date()) {
  */
 async function schoolBranding(schoolId, userId) {
   const [school, user] = await Promise.all([
-    Schools.findByPk(schoolId, { attributes: ["id", "name", "address", "phone", "email", "website"] }),
+    Schools.findByPk(schoolId, { attributes: ["id", "name", "address", "phone", "email", "website", "logo"] }),
     userId ? Users.findByPk(userId, { attributes: ["firstName", "lastName"] }) : null,
   ]);
   const contact = school ? [school.phone, school.email, school.website].filter(Boolean).join("  |  ") : "";
@@ -65,7 +86,7 @@ async function schoolBranding(schoolId, userId) {
     contact,
     generatedBy: fullName(user),
     generatedAt: generatedAt(),
-    logo: crestJpeg(),
+    logo: await logoFor(school ? school.logo : null),
     colors: COLORS,
   };
 }

@@ -20,6 +20,16 @@ module.exports = {
       author: Joi.string().allow("", null),
     }),
   },
+  validateUpdate: {
+    params: Joi.object({ id: Joi.string().required() }),
+    body: Joi.object({
+      classId: Joi.number().integer(),
+      kind: Joi.string().valid("Homework", "Classwork", "Notice"),
+      subject: Joi.string().min(1).max(128),
+      text: Joi.string().min(1).max(2000),
+      due: Joi.string().allow("", null),
+    }).min(1),
+  },
   validateUpdateStatus: {
     params: Joi.object({ id: Joi.string().required() }),
     body: Joi.object({

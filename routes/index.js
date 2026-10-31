@@ -63,6 +63,7 @@ router.use("/settings", settingsRouter);
 router.use("/audit-logs", auditRouter);
 router.use("/leave-requests", leaveRouter);
 router.use("/dashboard", dashboardRouter);
+router.use("/reports", require("./report"));
 router.use("/roles", require("./role"));
 
 module.exports = router;

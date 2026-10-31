@@ -22,6 +22,7 @@ module.exports = {
       effectiveFrom: calendarDay,
       effectiveTo: calendarDay.allow(null),
       notes: Joi.string().trim().max(2000).allow("", null),
+      replaceExisting: Joi.boolean().default(false),
     })
       .or("reasonId", "reasonLabel")
       .required(),

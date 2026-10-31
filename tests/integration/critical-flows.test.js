@@ -146,7 +146,6 @@ async function buildSchool() {
     grade: "5",
     section: "A",
     label: "Class 5-A",
-    monthlyTuitionFee: 1000,
     capacity: 30,
   });
   await FeeStructures.create({
@@ -278,7 +277,6 @@ describe("schema-aligned critical flows", () => {
       grade: "5",
       section: "B",
       label: "Class 5-B",
-      monthlyTuitionFee: 1000,
       capacity: 30,
     });
     await TimetableSlots.create({

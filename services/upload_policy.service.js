@@ -31,6 +31,14 @@ const FOLDERS = [
     },
   },
   {
+    pattern: /^school-logos\/(\d+)$/,
+    types: ["image/jpeg"],
+    async authorize(user, [schoolId]) {
+      if (!hasPermission(user, "school.update")) throw new ApiError(403, "Only a Super Admin can change the school logo.");
+      if (Number(schoolId) !== Number(user.schoolId)) throw new ApiError(403, "You can only upload your own school's logo.");
+    },
+  },
+  {
     pattern: /^admissions\/(\d+)\/documents$/,
     types: DOCUMENT_TYPES,
     async authorize(user, [applicationId]) {
@@ -54,9 +62,14 @@ async function assertCanUpload(user, { dirName, fileName, contentType }) {
   await folder.authorize(user, dir.match(folder.pattern).slice(1));
 }
 
+/** Object keys a school's logo may point at (JPEG only: PDFs and XLSX embed it as is). */
+function schoolLogoKeyPattern(schoolId) {
+  return new RegExp(`^school-logos/${Number(schoolId)}/${FILE_NAME.source.slice(1, -1).replace("[a-z0-9]{1,8}", "jpe?g")}$`, "i");
+}
+
 /** Object keys an application may point its documents at. */
 function admissionDocumentKeyPattern(applicationId) {
   return new RegExp(`^admissions/${Number(applicationId)}/documents/${FILE_NAME.source.slice(1)}`, "i");
 }
 
-module.exports = { assertCanUpload, admissionDocumentKeyPattern, FILE_NAME };
+module.exports = { assertCanUpload, admissionDocumentKeyPattern, schoolLogoKeyPattern, FILE_NAME };

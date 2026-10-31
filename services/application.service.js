@@ -247,13 +247,23 @@ async function syncDocuments(applicationId, documents, transaction) {
     if (!label) continue;
     const status = doc.status || "Pending";
     const fileUrl = documentFileRef(applicationId, doc, status);
-    const existing = doc.id
-      ? await ApplicationDocuments.findOne({ where: { id: doc.id, fkApplicationId: applicationId }, transaction })
-      : null;
+    // A saved row is matched by its id; a checklist item the portal hasn't saved yet (no id, or a
+    // draft id like "birth") by its title, so re-saving the checklist never appends a second copy.
+    let rowId = null;
+    let match = { title: label };
+    if (/^\d+$/.test(String(doc.id ?? ""))) {
+      rowId = Number(doc.id);
+      match = { id: rowId };
+    }
+    const existing = await ApplicationDocuments.findOne({
+      where: { fkApplicationId: applicationId, ...match },
+      order: [["id", "ASC"]],
+      transaction,
+    });
     if (existing) {
       if (storageService.isObjectKey(existing.fileUrl) && existing.fileUrl !== fileUrl) replaced.push(existing.fileUrl);
       await existing.update({ title: label, status, fileUrl }, { transaction });
-    } else if (!doc.id) {
+    } else if (!rowId) {
       await ApplicationDocuments.create(
         { fkApplicationId: applicationId, title: label, status, fileUrl, documentType: doc.documentType || "admission" },
         { transaction },

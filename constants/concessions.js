@@ -1,7 +1,10 @@
 "use strict";
 
-/** Simplified concession modes (fixed_payable removed). */
-exports.CONCESSION_MODES = ["percent", "fixed_discount", "waiver"];
+/**
+ * Concession modes, one per student per fee type:
+ * percent off, fixed amount off, fixed amount payable (the student pays exactly this), full waiver.
+ */
+exports.CONCESSION_MODES = ["percent", "fixed_discount", "fixed_payable", "waiver"];
 
 exports.CONCESSION_STATUSES = [
   "Draft",
@@ -15,7 +18,7 @@ exports.CONCESSION_STATUSES = [
 exports.APPROVAL_RULES = ["none", "always", "threshold"];
 
 exports.DEFAULT_CONCESSION_POLICY = {
-  allowedModes: ["percent", "fixed_discount", "waiver"],
+  allowedModes: ["percent", "fixed_discount", "fixed_payable", "waiver"],
   approvalRule: "none",
   approvalPercentAbove: null,
   approvalAmountAbove: null,

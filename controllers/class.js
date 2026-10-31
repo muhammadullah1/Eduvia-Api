@@ -8,7 +8,6 @@ function withoutFeeUnlessAllowed(req) {
   if (hasPermission(req.user, "settings.fees.update")) return req.body;
   const body = { ...req.body };
   delete body.monthlyFee;
-  delete body.monthlyTuitionFee;
   return body;
 }
 

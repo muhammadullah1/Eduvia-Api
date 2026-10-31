@@ -108,10 +108,10 @@ async function buildSchool() {
     fkSchoolId: school.id, fkUserId: teacherUser.id, fkSubjectId: subject.id, employeeCode: `LT${stamp}`.slice(0, 20),
   });
   const klass = await Classes.create({
-    fkSchoolId: school.id, fkSessionId: session.id, grade: "5", section: "A", label: "Class 5-A", monthlyTuitionFee: 1000, capacity: 30,
+    fkSchoolId: school.id, fkSessionId: session.id, grade: "5", section: "A", label: "Class 5-A", capacity: 30,
   });
   const next = await Classes.create({
-    fkSchoolId: school.id, fkSessionId: session.id, grade: "6", section: "A", label: "Class 6-A", monthlyTuitionFee: 1200, capacity: 1,
+    fkSchoolId: school.id, fkSessionId: session.id, grade: "6", section: "A", label: "Class 6-A", capacity: 1,
   });
   const student = await Students.create({
     fkSchoolId: school.id, fkClassId: klass.id, admissionNo: `ADM-${stamp}`.slice(0, 20),
@@ -151,7 +151,7 @@ describe("lifecycle, leave, reports, and documents", () => {
     });
     await expect(studentService.promote(fx.actor, fx.student.id, { classId: fx.next.id, date: "2026-10-01" })).rejects.toMatchObject({ statusCode: 409 });
     const room = await Classes.create({
-      fkSchoolId: fx.school.id, fkSessionId: fx.session.id, grade: "6", section: "B", label: "Class 6-B", monthlyTuitionFee: 1200, capacity: 20,
+      fkSchoolId: fx.school.id, fkSessionId: fx.session.id, grade: "6", section: "B", label: "Class 6-B", capacity: 20,
     });
     const promoted = await studentService.promote(fx.actor, fx.student.id, { classId: room.id, date: "2026-10-01" });
     expect(promoted.fkClassId).toBe(room.id);

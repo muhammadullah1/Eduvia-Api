@@ -20,6 +20,8 @@ function applyMode(base, concession) {
 
   if (concession.mode === "fixed_discount") {
     discount = Math.min(amount, value);
+  } else if (concession.mode === "fixed_payable") {
+    discount = amount - value;
   } else if (concession.mode === "percent") {
     discount = Math.min(amount, (amount * value) / 100);
   } else if (concession.mode === "waiver") {

@@ -10,7 +10,7 @@ const { hasPermission } = require("../services/permission.service");
  * new endpoint cannot leak them by accident. Outstanding amounts become a plain
  * yes/no `hasOutstanding` flag.
  */
-const STRIP = new Set(["monthlyFee", "monthlyTuitionFee", "monthly_tuition_fee", "fixedMonthlyFee", "fixed_monthly_fee", "financialStatus", "creditBalance", "credit_balance"]);
+const STRIP = new Set(["monthlyFee", "fixedMonthlyFee", "fixed_monthly_fee", "financialStatus", "creditBalance", "credit_balance"]);
 const TO_FLAG = new Set(["outstandingAmount", "outstanding_amount"]);
 
 function seesFeeAmounts(user) {
