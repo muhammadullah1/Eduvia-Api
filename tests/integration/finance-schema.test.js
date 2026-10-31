@@ -4,7 +4,7 @@ const {
   sequelize, FeeStructures, StudentCreditLedger, FeeImportBatches, FeeImportRows, OtherIncomes, Expenses, FeePayments,
 } = require("../../models");
 const { makeSchool, makeUser, makeClass, makeStudent } = require("../helpers/school");
-const creditBackfill = require("../../database/migrations-archive/060-student-credit-ledger").BACKFILL_SQL;
+const creditBackfill = require("../fixtures/student-credit-ledger-backfill").BACKFILL_SQL;
 const creditService = require("../../services/credit_ledger.service");
 const feeStructureService = require("../../services/fee_structure.service");
 const { defaultPermissionsFor, isGrantable } = require("../../constants/permissions");
@@ -63,7 +63,7 @@ describe("migration 059 fee_structures", () => {
   });
 });
 
-describe("migration 060 student_credit_ledger", () => {
+describe("student_credit_ledger backfill", () => {
   test("backfill creates one Credit per live payment with unallocated money, idempotently", async () => {
     const pay = (unallocated, extra = {}) => FeePayments.create({ fkSchoolId: school.id, fkStudentId: student.id, receiptNo: `R-${uniq()}`, amountPaid: 5000, unallocatedAmount: unallocated, paymentDate: "2026-10-01", ...extra });
     const withCredit = await pay(750);

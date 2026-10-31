@@ -156,7 +156,7 @@ function assertDeployable(nodeEnv, env) {
   const problems = deployProblems(nodeEnv, env);
   if (problems.length) {
     throw new Error(
-      `Eduvia API can't start in ${nodeEnv}:\n- ${problems.join("\n- ")}\nSee .env.example and docs/DEPLOYMENT-STAGE.md.`,
+      `Eduvia API can't start in ${nodeEnv}:\n- ${problems.join("\n- ")}\nSet the variables listed in .model_docs/docs/DEPLOYMENT-STAGE.md (section 4).`,
     );
   }
 }

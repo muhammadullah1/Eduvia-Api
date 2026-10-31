@@ -1,66 +1,56 @@
 "use strict";
 
 const bcrypt = require("bcryptjs");
-const { sequelize, Schools, Users, Teachers, AcademicSessions } = require("../../models");
 const { USER_ROLES, USER_STATUS } = require("../../constants");
 const { SYSTEM_ROLES } = require("../../constants/roles");
-const permissionService = require("../../services/permission.service");
-const feeTypePolicyService = require("../../services/fee_type_policy.service");
-const concessionReasonService = require("../../services/concession_reason.service");
 
 /**
- * Base data for a fresh database built from database/migrations-consolidated:
+ * DEVELOPMENT/STAGING ONLY. Base data for a fresh dev database built from database/migrations:
  * the permission catalog, one school with its system roles, fee-type policies and concession
  * reasons, and three staff logins for each staff role. Settings are not stored; the app falls back
  * to SETTING_DEFAULTS until someone saves them.
  *
- * Every value comes from the environment. Passwords are required, never logged, and hashed here:
- *   SEED_SUPER_ADMIN_PASSWORD, SEED_OPERATIONS_MANAGER_PASSWORD,
- *   SEED_ACCOUNTANT_PASSWORD, SEED_TEACHER_PASSWORD
- *   SEED_SCHOOL_NAME, SEED_SCHOOL_EMAIL, SEED_EMAIL_DOMAIN (required)
- *   SEED_SCHOOL_CODE, SEED_SCHOOL_PHONE, SEED_SCHOOL_ADDRESS, SEED_SCHOOL_WEBSITE (optional)
- *   SEED_SESSION_NAME, SEED_SESSION_START, SEED_SESSION_END (optional, all three or none)
- * Re-running is safe: an existing school with SEED_SCHOOL_EMAIL is left alone.
+ * All values below are hardcoded dev credentials; no environment variables are read. The deploy
+ * workflow runs this on staging deploys only. It refuses to run when the app environment
+ * (NODE_ENV, the same variable config/index.js reads as `env`) is production, so these logins can
+ * never be created there.
+ *
+ * Idempotent: when a school with DEV_SCHOOL.email already exists (even soft-deleted) nothing is
+ * created or changed.
  */
 
+const PRODUCTION_ENV = "production";
 const USERS_PER_ROLE = 3;
-const MIN_PASSWORD_LENGTH = 8;
 const HASH_ROUNDS = 10;
 
+const DEV_SCHOOL = {
+  name: "Eduvia Dev School",
+  email: "office@dev.geteduvia.site",
+  code: "EDUVIA-DEV",
+};
+const DEV_EMAIL_DOMAIN = "dev.geteduvia.site";
+
+// Dev-only initial passwords. Change them after first login on any shared server.
+const DEV_PASSWORDS = {
+  [USER_ROLES.SUPER_ADMIN]: "DevOnly-SuperAdmin#Edv26",
+  [USER_ROLES.OPERATIONS_MANAGER]: "DevOnly-OpsManager#Edv26",
+  [USER_ROLES.ACCOUNTANT]: "DevOnly-Accountant#Edv26",
+  [USER_ROLES.TEACHER]: "DevOnly-Teacher#Edv26",
+};
+
 const STAFF_ROLES = [
-  { role: USER_ROLES.SUPER_ADMIN, env: "SEED_SUPER_ADMIN_PASSWORD", slug: "admin" },
-  { role: USER_ROLES.OPERATIONS_MANAGER, env: "SEED_OPERATIONS_MANAGER_PASSWORD", slug: "operations" },
-  { role: USER_ROLES.ACCOUNTANT, env: "SEED_ACCOUNTANT_PASSWORD", slug: "accountant" },
-  { role: USER_ROLES.TEACHER, env: "SEED_TEACHER_PASSWORD", slug: "teacher" },
+  { role: USER_ROLES.SUPER_ADMIN, slug: "admin" },
+  { role: USER_ROLES.OPERATIONS_MANAGER, slug: "operations" },
+  { role: USER_ROLES.ACCOUNTANT, slug: "accountant" },
+  { role: USER_ROLES.TEACHER, slug: "teacher" },
 ];
 
 const ROLE_LABELS = new Map(SYSTEM_ROLES.map((entry) => [entry.key, entry.label]));
 
-function required(name) {
-  const value = process.env[name];
-  if (!value) throw new Error(`Seeder needs ${name} in the environment.`);
-  return value;
-}
-
-function optional(name) {
-  const value = process.env[name];
-  if (!value) return null;
-  return value;
-}
-
-function password(name) {
-  const value = required(name);
-  if (value.length < MIN_PASSWORD_LENGTH) throw new Error(`${name} must be at least ${MIN_PASSWORD_LENGTH} characters.`);
-  return value;
-}
-
-function sessionFromEnv() {
-  const values = ["SEED_SESSION_NAME", "SEED_SESSION_START", "SEED_SESSION_END"].map(optional);
-  const given = values.filter(Boolean).length;
-  if (given === 0) return null;
-  if (given !== values.length) throw new Error("Set all of SEED_SESSION_NAME, SEED_SESSION_START and SEED_SESSION_END, or none.");
-  const [name, startDate, endDate] = values;
-  return { name, startDate, endDate };
+function refuseProduction() {
+  if (process.env.NODE_ENV === PRODUCTION_ENV) {
+    throw new Error("Base-school seeder holds development-only credentials and refuses to run in production.");
+  }
 }
 
 function staffUsers(schoolId, domain, hashes) {
@@ -79,43 +69,39 @@ function staffUsers(schoolId, domain, hashes) {
 
 module.exports = {
   async up() {
-    const schoolEmail = required("SEED_SCHOOL_EMAIL");
-    const schoolName = required("SEED_SCHOOL_NAME");
-    const domain = required("SEED_EMAIL_DOMAIN");
-    const session = sessionFromEnv();
+    refuseProduction();
+    // Loaded after the guard so a production run stops before touching the database.
+    const { sequelize, Schools, Users, Teachers } = require("../../models");
+    const permissionService = require("../../services/permission.service");
+    const feeTypePolicyService = require("../../services/fee_type_policy.service");
+    const concessionReasonService = require("../../services/concession_reason.service");
+
+    const found = await Schools.findOne({ where: { email: DEV_SCHOOL.email }, paranoid: false });
+    if (found) {
+      console.log(`Base-school seeder: school ${found.id} already exists for ${DEV_SCHOOL.email}, nothing to do.`);
+      return;
+    }
+
     const hashes = new Map();
-    for (const entry of STAFF_ROLES) hashes.set(entry.role, await bcrypt.hash(password(entry.env), HASH_ROUNDS));
+    for (const entry of STAFF_ROLES) hashes.set(entry.role, await bcrypt.hash(DEV_PASSWORDS[entry.role], HASH_ROUNDS));
 
     await permissionService.syncCatalog();
-    const found = await Schools.findOne({ where: { email: schoolEmail }, paranoid: false });
-    if (found) return;
-
     await sequelize.transaction(async (transaction) => {
-      const school = await Schools.create(
-        {
-          name: schoolName,
-          email: schoolEmail,
-          code: optional("SEED_SCHOOL_CODE"),
-          phone: optional("SEED_SCHOOL_PHONE"),
-          address: optional("SEED_SCHOOL_ADDRESS"),
-          website: optional("SEED_SCHOOL_WEBSITE"),
-          status: "active",
-        },
-        { transaction },
-      );
+      const school = await Schools.create({ ...DEV_SCHOOL, status: "active" }, { transaction });
       await permissionService.ensureSystemRoles(school.id, transaction);
       await feeTypePolicyService.ensureDefaults(school.id, transaction);
       await concessionReasonService.ensureSeeded(school.id, transaction);
-      if (session) await AcademicSessions.create({ fkSchoolId: school.id, ...session, isCurrent: true }, { transaction });
 
-      const users = await Users.bulkCreate(staffUsers(school.id, domain, hashes), { transaction });
+      const users = await Users.bulkCreate(staffUsers(school.id, DEV_EMAIL_DOMAIN, hashes), { transaction });
       const teachers = users.filter((user) => user.role === USER_ROLES.TEACHER);
       await Teachers.bulkCreate(teachers.map((user) => ({ fkSchoolId: school.id, fkUserId: user.id })), { transaction });
     });
   },
 
   async down() {
-    const school = await Schools.findOne({ where: { email: required("SEED_SCHOOL_EMAIL") }, paranoid: false });
+    refuseProduction();
+    const { sequelize, Schools } = require("../../models");
+    const school = await Schools.findOne({ where: { email: DEV_SCHOOL.email }, paranoid: false });
     if (!school) return;
     const replacements = { id: school.id };
     await sequelize.transaction(async (transaction) => {

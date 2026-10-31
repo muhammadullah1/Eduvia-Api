@@ -18,8 +18,8 @@ School management API for Creative Leaders School (Eduvia). Phase 1 covers acade
 
 ```bash
 npm install
-# Create config/environments/development.json (this folder is not in git),
-# or copy .env.example to .env (both git-ignored) and set db credentials, port, FRONT_END_URL, JWT_SECRET
+# Create config/environments/development.json (not in git) with your local db credentials,
+# port, FRONT_END_URL and JWT_SECRET
 npm run db:migrate
 npm run dev
 ```
@@ -51,9 +51,8 @@ routes/          Express routers under /api
 models/          Sequelize models (auto-loaded)
 validations/     Joi schemas
 middlewares/     auth, validate, platform
-database/migrations/          Consolidated schema, one file per table (see database/MIGRATIONS.md)
-database/migrations-archive/  Original 001–088 history (reference/rollback only)
-database/seeders/             Base school + staff logins (passwords from SEED_* env)
+database/migrations/          001–060, one migration per table, queryInterface style (see .model_docs/MIGRATIONS.md)
+database/seeders/             Dev-only base school + staff logins (staging only; never production)
 ```
 
 ## File storage (Cloudflare R2)
@@ -77,7 +76,7 @@ Images are checked again (HEAD) before a record points at them.
 
 ## Staging / production
 
-Every setting comes from the environment: see `.env.example` and `docs/DEPLOYMENT-STAGE.md` (config, R2 CORS,
+Every setting comes from the server environment; the variables are listed in `.model_docs/docs/DEPLOYMENT-STAGE.md` (config, R2 CORS,
 deploy sequence, migrate, seed, smoke tests). With `NODE_ENV=staging` or `production` the API exits at startup
 with the list of missing or unsafe variables; the refresh cookie is `Secure; SameSite=None` and `trust proxy`
 is on by default in both.

@@ -1,6 +1,6 @@
 "use strict";
 
-const migration = require("../../database/migrations-archive/088-dedupe-application-documents");
+const migration = require("../fixtures/088-dedupe-application-documents");
 const applicationService = require("../../services/application.service");
 const { sequelize, Schools, Classes, AcademicSessions, ApplicationDocuments } = require("../../models");
 const { REQUIRED_ADMISSION_DOCUMENTS } = require("../../constants/admissions");

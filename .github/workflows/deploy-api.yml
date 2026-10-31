@@ -1,6 +1,6 @@
 name: Deploy API
 
-# Branch strategy (docs/DEPLOYMENT-STAGE.md):
+# Branch strategy (.model_docs/docs/DEPLOYMENT-STAGE.md):
 #   push to dev            -> staging environment (dev/stage Oracle server), automatically
 #   Run workflow, staging  -> any branch to staging (e.g. a feature branch)
 #   Run workflow, production -> production, only from main; the "production" GitHub Environment
@@ -20,7 +20,7 @@ permissions:
   contents: read
 
 env:
-  # package.json engines: node >=18; the server must run the same major (see docs/DEPLOYMENT-STAGE.md).
+  # package.json engines: node >=18; the server must run the same major (see .model_docs/docs/DEPLOYMENT-STAGE.md).
   NODE_VERSION: "20"
 
 jobs:
@@ -125,18 +125,24 @@ jobs:
             ./ "app:$APP_DIR/"
 
       - name: Install, migrate and reload
+        env:
+          DEPLOY_ENV: ${{ inputs.environment || 'staging' }}
         # Migrations and the app load the same config: a missing or unsafe variable in the server .env
         # stops the deploy here, before the running process is touched.
         run: |
           # shellcheck disable=SC2029 # values are meant to expand on the runner
-          ssh app "APP_DIR='$APP_DIR' PM2_APP_NAME='$PM2_APP_NAME' bash -s" <<'REMOTE'
+          ssh app "APP_DIR='$APP_DIR' PM2_APP_NAME='$PM2_APP_NAME' DEPLOY_ENV='$DEPLOY_ENV' bash -s" <<'REMOTE'
           set -euo pipefail
           cd "$APP_DIR"
-          test -f .env || { echo "Missing $APP_DIR/.env on the server (copy .env.example and fill it)"; exit 1; }
+          test -f .env || { echo "Missing $APP_DIR/.env on the server (set the variables from .model_docs/docs/DEPLOYMENT-STAGE.md section 4)"; exit 1; }
           node -e 'const [major] = process.versions.node.split("."); if (Number(major) < 18) { console.error("Node >= 18 required"); process.exit(1) }'
-          # sequelize-cli is a devDependency: install everything, migrate, then drop dev packages.
+          # sequelize-cli is a devDependency: install everything, migrate, seed, then drop dev packages.
           npm ci
           npx --no-install sequelize db:migrate
+          # Dev seed (hardcoded dev-only logins): staging only, never production. Idempotent.
+          if [ "$DEPLOY_ENV" = "staging" ]; then
+            npx --no-install sequelize db:seed --seed 20261031120000-eduvia-base-school.js
+          fi
           npm prune --omit=dev
           if pm2 describe "$PM2_APP_NAME" > /dev/null 2>&1; then
             pm2 reload ecosystem.config.js --only "$PM2_APP_NAME" --update-env
