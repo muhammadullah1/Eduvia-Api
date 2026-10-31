@@ -52,11 +52,9 @@ module.exports = (sequelize, DataTypes) => {
         allowNull: true,
         field: "period_start_times",
       },
-      monthlyTuitionFee: {
-        type: DataTypes.DECIMAL(12, 2),
-        allowNull: false,
-        defaultValue: 0.0,
-        field: "monthly_tuition_fee",
+      // Not stored: the Tuition row in force (fee structure is the only source of truth).
+      monthlyFee: {
+        type: DataTypes.VIRTUAL,
       },
       capacity: {
         type: DataTypes.INTEGER,
@@ -77,16 +75,6 @@ module.exports = (sequelize, DataTypes) => {
       updatedAt: "updated_at",
       deletedAt: "archived_at",
       underscored: true,
-      getterMethods: {
-        monthlyFee() {
-          return this.getDataValue("monthlyTuitionFee");
-        },
-      },
-      setterMethods: {
-        monthlyFee(val) {
-          this.setDataValue("monthlyTuitionFee", val);
-        },
-      },
     }
   );
 

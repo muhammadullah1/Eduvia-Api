@@ -79,7 +79,7 @@ async function applyToOpenBills(actor, studentId, { transaction, feeMonthIds = n
   await lockStudent(studentId, transaction);
   let available = cents(await balance(actor.schoolId, studentId, { transaction }));
   if (available <= 0) return [];
-  const where = { fkStudentId: studentId, paidAmount: { [Op.lt]: col("net_amount") } };
+  const where = { fkStudentId: studentId, paidAmount: { [Op.lt]: col("collectible_amount") } };
   if (feeMonthIds) {
     if (!feeMonthIds.length) return [];
     where.id = feeMonthIds;
@@ -88,7 +88,8 @@ async function applyToOpenBills(actor, studentId, { transaction, feeMonthIds = n
   const lines = [];
   for (const bill of bills) {
     if (available <= 0) break;
-    const owed = cents(bill.getDataValue("netAmount")) - cents(bill.getDataValue("paidAmount"));
+    const due = Number(bill.getDataValue("collectibleAmount") ?? bill.getDataValue("netAmount"));
+    const owed = cents(due) - cents(bill.getDataValue("paidAmount"));
     const take = Math.min(owed, available);
     if (take <= 0) continue;
     await StudentCreditLedger.create(
@@ -96,7 +97,7 @@ async function applyToOpenBills(actor, studentId, { transaction, feeMonthIds = n
       { transaction },
     );
     const paid = fromCents(cents(bill.getDataValue("paidAmount")) + take);
-    await bill.update({ paidAmount: paid, status: feeMonthStatus({ amountDue: bill.getDataValue("netAmount"), amountPaid: paid, month: bill.month }, currentMonth) }, { transaction });
+    await bill.update({ paidAmount: paid, status: feeMonthStatus({ amountDue: due, amountPaid: paid, month: bill.month }, currentMonth) }, { transaction });
     available -= take;
     lines.push({ feeMonthId: bill.id, month: bill.month, label: monthLabel(bill.month), feeType: bill.feeType, amount: fromCents(take) });
   }

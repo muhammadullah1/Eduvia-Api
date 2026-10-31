@@ -17,7 +17,7 @@ async function buildSchool() {
   const english = await Subjects.create({ fkSchoolId: school.id, name: "English", code: `PE${stamp}`.slice(0, 20) });
   const islamiyat = await Subjects.create({ fkSchoolId: school.id, name: "Islamiyat", code: `PI${stamp}`.slice(0, 20) });
   const klass = await Classes.create({
-    fkSchoolId: school.id, fkSessionId: session.id, grade: "KG", section: "Main", label: "KG", monthlyTuitionFee: 1000, capacity: 30,
+    fkSchoolId: school.id, fkSessionId: session.id, grade: "KG", section: "Main", label: "KG", capacity: 30,
   });
   await ClassSubjects.create({ fkClassId: klass.id, fkSubjectId: english.id, defaultTotalMarks: 100, defaultPassingMarks: 40 });
   await ClassSubjects.create({ fkClassId: klass.id, fkSubjectId: islamiyat.id, defaultTotalMarks: 50, defaultPassingMarks: 25 });

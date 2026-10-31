@@ -10,6 +10,7 @@ const router = express.Router();
 
 router.get("/", authorize("updates.read"), validate(v.validateList), c.list);
 router.post("/", authorize("updates.write"), validate(v.validateCreate), c.create);
+router.patch("/:id", authorize("updates.write"), validate(v.validateUpdate), c.update);
 router.patch("/:id/status", authorize("updates.review"), validate(v.validateUpdateStatus), c.setStatus);
 router.delete("/:id", authorize("updates.review"), validate(v.validateId), c.remove);
 

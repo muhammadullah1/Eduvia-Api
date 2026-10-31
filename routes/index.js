@@ -26,7 +26,7 @@ const expenseRouter = require("./expense");
 const feeStructureRouter = require("./fee_structure");
 const noticeRouter = require("./notice");
 const leaveRouter = require("./leave");
-const reportRouter = require("./report");
+const dashboardRouter = require("./dashboard");
 
 const router = express.Router();
 
@@ -46,6 +46,9 @@ router.use("/fees", feeRouter);
 router.use("/expenses", expenseRouter);
 router.use("/finance", require("./finance"));
 router.use("/fee-structures", feeStructureRouter);
+router.use("/fee-concessions", require("./fee_concession"));
+router.use("/concession-reasons", require("./concession_reason"));
+router.use("/families", require("./family"));
 router.use("/updates", noticeRouter);
 router.use("/system-notices", require("./system_notice"));
 router.use("/exams", examRouter);
@@ -59,6 +62,8 @@ router.use("/settings/locations", require("./location"));
 router.use("/settings", settingsRouter);
 router.use("/audit-logs", auditRouter);
 router.use("/leave-requests", leaveRouter);
-router.use("/reports", reportRouter);
+router.use("/dashboard", dashboardRouter);
+router.use("/reports", require("./report"));
+router.use("/roles", require("./role"));
 
 module.exports = router;

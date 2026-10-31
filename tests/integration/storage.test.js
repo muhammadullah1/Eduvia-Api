@@ -38,7 +38,7 @@ describe("file storage and document access", () => {
   test("presigned upload: auth required, folder/type/name checked, key is dirName/fileName", async () => {
     const fx = await fixture();
     const fileName = `${crypto.randomUUID()}.pdf`;
-    const body = { dirName: `/admissions/${fx.draft.id}/documents/`, fileName, contentType: "application/pdf" };
+    const body = { dirName: `/admissions/${fx.draft.id}/documents/`, fileName, contentType: "application/pdf", contentLength: 1024 };
     const path = "/api/auth/get-presigned-url";
 
     expect((await request(app, { method: "POST", path, body })).status).toBe(401);
@@ -48,10 +48,11 @@ describe("file storage and document access", () => {
     expect(ok.body.data).toMatchObject({
       objectKey: `admissions/${fx.draft.id}/documents/${fileName}`,
       contentType: "application/pdf",
+      contentLength: 1024,
       expiresIn: 300,
     });
     expect(ok.body.data.uploadUrl).toContain("X-Amz-Signature");
-    expect(Object.keys(ok.body.data).sort()).toEqual(["bucket", "contentType", "expiresIn", "fileUrl", "objectKey", "uploadUrl"]);
+    expect(Object.keys(ok.body.data).sort()).toEqual(["bucket", "contentLength", "contentType", "expiresIn", "fileUrl", "objectKey", "uploadUrl"]);
 
     const teacher = await request(app, { method: "POST", path, body, token: tokenFor(fx.teacher) });
     expect(teacher.status).toBe(403);
@@ -63,6 +64,13 @@ describe("file storage and document access", () => {
     expect(badType.status).toBe(400);
     const tooLong = await request(app, { method: "POST", path, body: { ...body, dirName: "a".repeat(101) }, token: tokenFor(fx.admin) });
     expect(tooLong.status).toBe(400);
+    const noSize = await request(app, { method: "POST", path, body: { ...body, contentLength: undefined }, token: tokenFor(fx.admin) });
+    expect(noSize.status).toBe(400);
+    const overDocLimit = await request(app, { method: "POST", path, body: { ...body, contentLength: 10 * 1024 * 1024 + 1 }, token: tokenFor(fx.admin) });
+    expect(overDocLimit.status).toBe(400);
+    const atDocLimit = await request(app, { method: "POST", path, body: { ...body, contentLength: 10 * 1024 * 1024 }, token: tokenFor(fx.admin) });
+    expect(atDocLimit.status).toBe(200);
+    expect(atDocLimit.body.data.uploadUrl).toContain("content-length");
   });
 
   test("document link: 401 without token, 403 for teacher and another parent, 200 for admin and own parent", async () => {

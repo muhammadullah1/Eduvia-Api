@@ -8,6 +8,7 @@ module.exports = {
       dirName: Joi.string().trim().max(100).required(),
       fileName: Joi.string().trim().max(255).required(),
       contentType: Joi.string().trim().max(100).required(),
+      contentLength: Joi.number().integer().min(1).required(),
     }),
   },
   validateLogin: {

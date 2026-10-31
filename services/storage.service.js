@@ -1,6 +1,6 @@
 "use strict";
 
-const { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } = require("@aws-sdk/client-s3");
+const { DeleteObjectCommand, GetObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client } = require("@aws-sdk/client-s3");
 const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
 const config = require("../config");
 const ApiError = require("../utils/ApiError");
@@ -63,18 +63,26 @@ function publicUrlFor(objectKey, cfg = storageConfig()) {
   return `${cfg.publicBaseUrl}/${objectKey}`;
 }
 
-/** Presigned PUT for a direct browser upload (the API never sees the bytes). */
-async function presignUpload({ dirName, fileName, contentType }) {
+/**
+ * Presigned PUT for a direct browser upload (the API never sees the bytes). R2 has no presigned POST
+ * (so no content-length-range policy); instead Content-Type and the exact Content-Length are signed,
+ * and R2 refuses a body of another type or size.
+ */
+async function presignUpload({ dirName, fileName, contentType, contentLength }) {
   const cfg = requireConfig();
   const objectKey = objectKeyFor(dirName, fileName);
-  const command = new PutObjectCommand({ Bucket: cfg.bucket, Key: objectKey, ContentType: contentType });
-  const uploadUrl = await getSignedUrl(s3(cfg), command, { expiresIn: UPLOAD_EXPIRES_IN });
+  const command = new PutObjectCommand({ Bucket: cfg.bucket, Key: objectKey, ContentType: contentType, ContentLength: contentLength });
+  const uploadUrl = await getSignedUrl(s3(cfg), command, {
+    expiresIn: UPLOAD_EXPIRES_IN,
+    signableHeaders: new Set(["content-type", "content-length"]),
+  });
   return {
     uploadUrl,
     fileUrl: publicUrlFor(objectKey, cfg),
     objectKey,
     bucket: cfg.bucket,
     contentType,
+    contentLength,
     expiresIn: UPLOAD_EXPIRES_IN,
   };
 }
@@ -84,6 +92,18 @@ async function signedDownloadUrl(objectKey, expiresIn = DOWNLOAD_EXPIRES_IN) {
   const cfg = requireConfig();
   const command = new GetObjectCommand({ Bucket: cfg.bucket, Key: objectKey });
   return { url: await getSignedUrl(s3(cfg), command, { expiresIn }), expiresIn };
+}
+
+/** Size and type of a stored object, or null when it doesn't exist (or storage isn't configured). */
+async function objectInfo(objectKey) {
+  const cfg = storageConfig();
+  if (!cfg || !objectKey) return null;
+  try {
+    const head = await s3(cfg).send(new HeadObjectCommand({ Bucket: cfg.bucket, Key: objectKey }));
+    return { size: Number(head.ContentLength), contentType: head.ContentType };
+  } catch {
+    return null;
+  }
 }
 
 /** Best-effort delete; a missing object or storage outage is not fatal. */
@@ -112,5 +132,6 @@ module.exports = {
   presignUpload,
   signedDownloadUrl,
   deleteObject,
+  objectInfo,
   isObjectKey,
 };

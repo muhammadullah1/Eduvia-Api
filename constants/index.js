@@ -157,6 +157,8 @@ exports.SETTING_KEYS = {
   FEES: "fees",
   ADMISSION: "admission",
   ATTENDANCE: "attendance",
+  GRADING: "grading",
+  RECEIPT: "receipt",
 };
 
 exports.SETTING_DEFAULTS = {
@@ -179,13 +181,36 @@ exports.SETTING_DEFAULTS = {
     rankTie: "shared",
   },
   fees: {
-    defaultMonthlyFee: 8500,
     dueDay: 10,
     maxAdvanceMonths: 12,
+    // There is no school-wide defaultMonthlyFee — amounts come from Fee Structure only.
+    // Concessions are always applied from the student's Approved row (see concessionPolicy).
+    concessionPolicy: {
+      allowedModes: ["percent", "fixed_discount", "fixed_payable", "waiver"],
+      approvalRule: "none",
+      approvalPercentAbove: null,
+      approvalAmountAbove: null,
+    },
   },
   admission: {
     prefix: "CLS",
     digits: 4,
+  },
+  // Letter grade per percentage band (highest first); a failed paper is always FAIL_GRADE.
+  grading: {
+    bands: [
+      { min: 90, grade: "A+" },
+      { min: 80, grade: "A" },
+      { min: 70, grade: "B" },
+      { min: 60, grade: "C" },
+      { min: 50, grade: "D" },
+      { min: 0, grade: "E" },
+    ],
+  },
+  // Printed on every fee receipt (screen print and PDF).
+  receipt: {
+    footerNote: "",
+    showSignatureLine: true,
   },
 };
 
@@ -196,14 +221,7 @@ exports.SETTING_DEFAULTS = {
  * A failed paper (or a student who failed any paper) is always F, and a passed
  * paper is never F — e.g. 40/100 with a pass mark of 40 is an E.
  */
-exports.GRADE_BANDS = [
-  { min: 90, grade: "A+" },
-  { min: 80, grade: "A" },
-  { min: 70, grade: "B" },
-  { min: 60, grade: "C" },
-  { min: 50, grade: "D" },
-  { min: 0, grade: "E" },
-];
+exports.GRADE_BANDS = exports.SETTING_DEFAULTS.grading.bands;
 
 /** Grade shown for any failed paper or failed overall result. */
 exports.FAIL_GRADE = "F";
@@ -211,7 +229,4 @@ exports.FAIL_GRADE = "F";
 exports.WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
 /** CORS allow-list; set ALLOWED_ORIGINS (comma-separated) per environment. */
-exports.ALLOWED_ORIGINS = String(require("../config").get("allowedOrigins"))
-  .split(",")
-  .map((origin) => origin.trim().replace(/\/+$/, ""))
-  .filter(Boolean);
+exports.ALLOWED_ORIGINS = require("../config/runtime").parseOrigins(require("../config").get("allowedOrigins"));

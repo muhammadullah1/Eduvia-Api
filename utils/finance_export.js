@@ -16,6 +16,19 @@ const GREEN = "16A34A";
 const RED = "DC2626";
 const BLUE = "2563EB";
 const rs = (v) => `Rs ${money(v)}`;
+const TICKS = 4;
+const NICE_STEPS = [1, 2, 2.5, 5, 10];
+const DECADE = 10;
+
+/** Smallest "round" step (1, 2, 2.5 or 5 x 10^k, at least 1) so TICKS steps cover `max`; 0 when there is nothing to plot. */
+function axisStep(max) {
+  if (max <= 0) return 0;
+  const raw = max / TICKS;
+  const scale = DECADE ** Math.max(0, Math.floor(Math.log10(raw)));
+  const step = NICE_STEPS.find((n) => n * scale >= raw) * scale;
+  return Math.max(1, step);
+}
+
 const signed = (v) => (v < 0 ? `-Rs ${money(-v)}` : rs(v));
 
 // The period label is the PDF subtitle (top right), so the fact boxes never cut it.
@@ -86,18 +99,25 @@ function barChart(doc, brand, r) {
   const top = doc.y;
   const axisX = m + 48;
   const plotW = usable - 56;
-  const max = Math.max(1, ...r.series.flatMap((s) => [s.income, s.expenses]));
-  for (let i = 0; i <= 4; i += 1) {
-    const y = top + h - (h * i) / 4;
+  const step = axisStep(Math.max(0, ...r.series.flatMap((s) => [s.income, s.expenses])));
+  const max = step * TICKS;
+  const ticks = step ? TICKS : 0;
+  for (let i = 0; i <= ticks; i += 1) {
+    const y = top + h - (h * i) / TICKS;
     doc.line(axisX, y, axisX + plotW, y, { width: 0.3, color: rgb(c.line) });
-    doc.text(m, y + 3, money(Math.round((max * i) / 4)), { size: 6.5, color: rgb(c.muted), width: 44, align: "right" });
+    doc.text(m, y + 3, money(step * i), { size: 6.5, color: rgb(c.muted), width: 44, align: "right" });
   }
+  if (!step) doc.text(axisX, top + h / 2, "No income or expenses in these months.", { size: 8, color: rgb(c.muted), width: plotW, align: "center" });
   const slot = plotW / r.series.length;
   const bw = Math.min(18, slot / 3);
   r.series.forEach((s, i) => {
     const x = axisX + i * slot + slot / 2 - bw;
-    const ih = (h * s.income) / max;
-    const eh = (h * s.expenses) / max;
+    let ih = 0;
+    let eh = 0;
+    if (max) {
+      ih = (h * s.income) / max;
+      eh = (h * s.expenses) / max;
+    }
     if (ih > 0) doc.rect(x, top + h - ih, bw, ih, { fill: rgb(GREEN), stroke: false });
     if (eh > 0) doc.rect(x + bw + 1, top + h - eh, bw, eh, { fill: rgb(RED), stroke: false });
     doc.text(axisX + i * slot, top + h + 11, s.label, { size: 7, color: rgb(c.muted), width: slot, align: "center" });
@@ -218,4 +238,4 @@ async function renderFinance(report, format, brand) {
   throw new Error(`Unknown format ${format}`);
 }
 
-module.exports = { renderFinance };
+module.exports = { renderFinance, axisStep };

@@ -6,6 +6,7 @@ const { handle } = require("../utils/handler");
 module.exports = {
   list: handle("Updates", (req) => noticeService.list(req.user, req.query)),
   create: handle("Update drafted", (req) => noticeService.create(req.user, req.body), 201),
+  update: handle("Update saved", (req) => noticeService.update(req.user, req.params.id, req.body)),
   setStatus: handle("Update status changed", (req) => noticeService.setStatus(req.user, req.params.id, req.body.status)),
   remove: handle("Update deleted", (req) => noticeService.remove(req.user, req.params.id)),
 };

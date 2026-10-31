@@ -7,6 +7,11 @@ const ApiError = require("../utils/ApiError");
 const auditService = require("./audit.service");
 const { syncClassStatus } = require("./class.service");
 const lifecycle = require("./lifecycle.service");
+const feeService = require("./fee.service");
+const storageService = require("./storage.service");
+const { assertStoredImage, studentPhotoKeyPattern } = require("./upload_policy.service");
+
+const PHOTO_LINK_SECONDS = 3600;
 
 /**
  * `scope` narrows rows for restricted roles: parents get their linked
@@ -137,6 +142,7 @@ async function promote(actor, id, { classId, sessionId, date }) {
       outcome: "Promoted",
     }, { transaction });
     await student.update({ fkClassId: nextClass.id }, { transaction });
+    await feeService.billPromotionIfConfigured(actor, student, nextClass, date, transaction);
     await syncClassStatus([previousClassId, nextClass.id], transaction);
     await auditService.record(actor, `promoted student #${student.id} to class #${nextClass.id}`, {
       entityType: "student",
@@ -166,4 +172,31 @@ async function remove(id, schoolId) {
   return true;
 }
 
-module.exports = { list, getById, create, update, remove, changeStatus, promote };
+/** The student as JSON plus `photoUrl`, a short-lived link to the uploaded photo (null when none). */
+async function withPhotoUrl(student) {
+  const json = student.toJSON();
+  json.photoUrl = null;
+  if (storageService.isObjectKey(json.photo) && storageService.storageConfig()) {
+    json.photoUrl = (await storageService.signedDownloadUrl(json.photo, PHOTO_LINK_SECONDS)).url;
+  }
+  return json;
+}
+
+/**
+ * Points the student at an uploaded photo (`students/<id>/photos/<uuid>.<jpg|png>`), or clears it
+ * with null. The replaced file is deleted once the change is committed so nothing is orphaned.
+ */
+async function setPhoto(id, schoolId, photo) {
+  if (photo && !studentPhotoKeyPattern(id).test(photo)) throw new ApiError(400, "Upload the photo to this student's photo folder first.");
+  const row = await Students.findOne({ where: { id, fkSchoolId: schoolId } });
+  if (!row) throw new ApiError(404, "Student not found");
+  const previous = row.photo;
+  if (photo && photo !== previous) await assertStoredImage(photo);
+  await row.update({ photo: photo || null });
+  if (previous && previous !== row.photo && storageService.isObjectKey(previous)) {
+    await storageService.deleteObject(previous);
+  }
+  return withPhotoUrl(await getById(id, schoolId));
+}
+
+module.exports = { list, getById, create, update, remove, changeStatus, promote, setPhoto, withPhotoUrl };

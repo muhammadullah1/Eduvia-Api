@@ -48,6 +48,7 @@ async function list(user, { classId, status, kind } = {}) {
 }
 
 async function create(actor, data) {
+  await accessService.assertTeacherClass(actor, data.classId);
   const updates = await getStoredUpdates(actor.schoolId);
   const user = await Users.findByPk(actor.id);
   const authorName = user ? `${user.firstName} ${user.lastName}` : data.author || "Staff";
@@ -74,6 +75,31 @@ async function create(actor, data) {
   });
 
   return newUpdate;
+}
+
+/** Fields an author may change while an update waits for review. */
+const EDITABLE = ["classId", "kind", "subject", "text", "due"];
+/** An author edits only before approval; editing a rejected update re-submits it as a draft. */
+const AUTHOR_EDITABLE_STATUSES = ["Draft", "Rejected"];
+
+async function update(actor, id, data) {
+  const updates = await getStoredUpdates(actor.schoolId);
+  const item = updates.find((u) => u.id === id);
+  if (!item) throw new ApiError(404, "Update not found");
+  if (item.authorUserId !== actor.id) throw new ApiError(403, "You can only edit your own updates.");
+  if (!AUTHOR_EDITABLE_STATUSES.includes(item.status)) throw new ApiError(409, "Approved or published updates are locked.");
+  if (data.classId !== undefined) await accessService.assertTeacherClass(actor, data.classId);
+
+  const changes = Object.fromEntries(EDITABLE.filter((key) => data[key] !== undefined).map((key) => [key, data[key]]));
+  if (changes.classId !== undefined) changes.classId = Number(changes.classId);
+  Object.assign(item, changes, { status: "Draft", updatedAt: new Date().toISOString() });
+  await saveStoredUpdates(actor.schoolId, updates, actor.id);
+  await auditService.record(actor, `edited class notice "${item.subject}"`, {
+    entityType: "school_update",
+    entityId: null,
+    metadata: { updateId: id, fields: Object.keys(changes) },
+  });
+  return item;
 }
 
 async function setStatus(actor, id, status) {
@@ -103,4 +129,4 @@ async function remove(actor, id) {
   return true;
 }
 
-module.exports = { list, create, setStatus, remove };
+module.exports = { list, create, update, setStatus, remove };

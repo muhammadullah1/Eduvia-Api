@@ -2,6 +2,7 @@
 
 const convict = require("convict");
 require("dotenv").config();
+const runtime = require("./runtime");
 
 const config = convict({
   env: {
@@ -64,7 +65,8 @@ const config = convict({
   signInJwtSecret: {
     doc: "JWT secret for sign-in tokens",
     format: String,
-    default: "change-me-in-production",
+    // Only for development/test; staging and production refuse to start with it (config/runtime.js).
+    default: runtime.DEFAULT_JWT_SECRET,
     env: "JWT_SECRET",
   },
   appVersion: {
@@ -131,6 +133,32 @@ const config = convict({
       env: "CLOUDFLARE_R2_PUBLIC_BASE_URL",
     },
   },
+  cookie: {
+    secure: {
+      doc: 'Refresh cookie Secure flag: "true", "false" or "" for the per-environment default',
+      format: String,
+      default: "",
+      env: "COOKIE_SECURE",
+    },
+    sameSite: {
+      doc: 'Refresh cookie SameSite: "lax", "strict", "none" or "" for the per-environment default',
+      format: String,
+      default: "",
+      env: "COOKIE_SAMESITE",
+    },
+    domain: {
+      doc: "Optional refresh cookie Domain (leave empty for the API host only)",
+      format: String,
+      default: "",
+      env: "COOKIE_DOMAIN",
+    },
+  },
+  trustProxy: {
+    doc: 'Express "trust proxy": true/false, hop count or trust string; "" = 1 in staging/production, false otherwise',
+    format: String,
+    default: "",
+    env: "TRUST_PROXY",
+  },
   allowedOrigins: {
     doc: "Comma-separated browser origins allowed by CORS (with credentials)",
     format: String,
@@ -148,6 +176,9 @@ if (env === "development" || env === "test") {
 }
 
 config.validate({ allowed: "strict" });
+
+// Staging/production: fail at boot on missing or unsafe settings instead of using the defaults above.
+runtime.assertDeployable(config.get("env"), process.env);
 
 // Aliases for seamless access via 'r2' or 'cloudflareR2'
 const originalGet = config.get.bind(config);

@@ -6,9 +6,14 @@ Sources: SRS §4.5, §4.6, §4.7, §6.5, §10, §15.9, §15.10; P1-05, P1-06, P1
 
 One row per student, per month (`YYYY-MM`), per fee type.
 
-Working default type is tuition. The baseline still allows more types (admission, exam, annual, transport, other) once the school confirms them. Do not invent extra charges.
+Fee types (`FEE_TYPES`): Tuition (monthly), Admission, Exam, Annual, and Promotion (one-time, added in migration `076`). Do not invent extra charges.
 
-Amount due comes from the class monthly fee. If the class has none, use `fees.defaultMonthlyFee`.
+There is no school-wide base or default tuition. Every amount comes only from the class Fee Structure, per class and per session. `fees.defaultMonthlyFee` was removed (migration `075`).
+
+- No active Fee Structure row for a class / fee type in that month, or an amount of 0 or less → the row is not billed. Generation preview lists it as "No fee structure for <class> / <fee type>" and blocks confirm for it.
+- A Tuition row stored as 0 means "not configured" and stays editable as initial setup despite the session lock.
+- Promotion is billed once on promote / bulk-promote from the target class structure; skipped if missing or ≤ 0; never repriced.
+- Screens show the class's own amount or "Not configured". Never a school default.
 
 | Status | Meaning |
 |---|---|

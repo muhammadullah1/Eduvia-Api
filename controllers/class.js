@@ -1,14 +1,13 @@
 "use strict";
 
 const { classService } = require("../services");
-const { can } = require("../constants/permissions");
+const { hasPermission } = require("../services/permission.service");
 
 /** The class fee is set only by roles that manage fee settings; Ops edits the rest of the class. */
 function withoutFeeUnlessAllowed(req) {
-  if (can(req.user.role, "settings.fees.update")) return req.body;
+  if (hasPermission(req.user, "settings.fees.update")) return req.body;
   const body = { ...req.body };
   delete body.monthlyFee;
-  delete body.monthlyTuitionFee;
   return body;
 }
 

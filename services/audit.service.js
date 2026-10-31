@@ -2,7 +2,7 @@
 
 const { Op } = require("sequelize");
 const { AuditLogs, sequelize } = require("../models");
-const { can } = require("../constants/permissions");
+const { hasPermission } = require("./permission.service");
 
 async function log(schoolId, { actorUserId, actorLabel, action, entityType, entityId, metadata }, options = {}) {
   return AuditLogs.create(
@@ -40,7 +40,7 @@ const FEE_ENTITY_TYPES = ["fee_payment", "student_fee_month", "expense", "fee_st
 
 async function list(schoolId, { limit = 50, entityType, entityId } = {}, viewer = null) {
   const where = { fkSchoolId: schoolId };
-  const feeBlind = viewer && !can(viewer.role, "fees.amounts.read");
+  const feeBlind = viewer && !hasPermission(viewer, "fees.amounts.read");
   if (feeBlind && FEE_ENTITY_TYPES.includes(entityType)) return [];
   if (entityType) where.entityType = entityType;
   else if (feeBlind) where[Op.or] = [{ entityType: null }, { entityType: { [Op.notIn]: FEE_ENTITY_TYPES } }];

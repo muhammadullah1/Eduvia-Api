@@ -20,6 +20,7 @@ const {
   DailyLessons,
   MarkSheets,
   StudentFeeMonths,
+  FeeStructures,
 } = require("../../models");
 const applicationService = require("../../services/application.service");
 const attendanceService = require("../../services/attendance.service");
@@ -145,8 +146,16 @@ async function buildSchool() {
     grade: "5",
     section: "A",
     label: "Class 5-A",
-    monthlyTuitionFee: 1000,
     capacity: 30,
+  });
+  await FeeStructures.create({
+    fkSchoolId: school.id,
+    fkSessionId: session.id,
+    fkClassId: klass.id,
+    feeType: "Tuition",
+    frequency: "Monthly",
+    amount: 1000,
+    effectiveFrom: "2026-04-01",
   });
   await TimetableSlots.create({
     fkSchoolId: school.id,
@@ -268,7 +277,6 @@ describe("schema-aligned critical flows", () => {
       grade: "5",
       section: "B",
       label: "Class 5-B",
-      monthlyTuitionFee: 1000,
       capacity: 30,
     });
     await TimetableSlots.create({

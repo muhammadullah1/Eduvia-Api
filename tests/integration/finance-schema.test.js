@@ -4,10 +4,12 @@ const {
   sequelize, FeeStructures, StudentCreditLedger, FeeImportBatches, FeeImportRows, OtherIncomes, Expenses, FeePayments,
 } = require("../../models");
 const { makeSchool, makeUser, makeClass, makeStudent } = require("../helpers/school");
-const creditBackfill = require("../../database/migrations/060-student-credit-ledger").BACKFILL_SQL;
+const creditBackfill = require("../../database/migrations-archive/060-student-credit-ledger").BACKFILL_SQL;
 const creditService = require("../../services/credit_ledger.service");
 const feeStructureService = require("../../services/fee_structure.service");
-const { can } = require("../../constants/permissions");
+const { defaultPermissionsFor, isGrantable } = require("../../constants/permissions");
+
+const can = (role, key) => defaultPermissionsFor(role).includes(key);
 const otherIncomeValidation = require("../../validations/other_income");
 const feeStructureValidation = require("../../validations/fee_structure");
 
@@ -19,7 +21,6 @@ beforeAll(async () => {
   ({ school, session } = await makeSchool());
   admin = await makeUser(school.id, "super_admin");
   klass = await makeClass(school.id, session.id);
-  await klass.update({ monthlyTuitionFee: 4500 });
   student = await makeStudent(school.id, klass.id);
 });
 
@@ -32,7 +33,10 @@ describe("migration 059 fee_structures", () => {
   // The 059 backfill (class fee -> Tuition row) ran during migration up/down/up; its
   // ON CONFLICT target was replaced by 063's effective-date index, so it is not re-run here.
   test("fee structure view lists the four types and counts only monthly fees", async () => {
-    await FeeStructures.create({ fkSchoolId: school.id, fkSessionId: session.id, fkClassId: klass.id, feeType: "Tuition", frequency: "Monthly", amount: 4500, effectiveFrom: "2026-04-01" });
+    const tuition = await FeeStructures.findOne({
+      where: { fkClassId: klass.id, feeType: "Tuition" },
+    });
+    await tuition.update({ amount: 4500 });
     const view = await feeStructureService.forClass(school.id, klass.id, { asOf: "2026-05-01" });
     expect(view.fees.map((f) => f.feeType)).toEqual(["Tuition"]);
     expect(view.monthlyTotal).toBe(4500);
@@ -77,8 +81,8 @@ describe("migration 060 student_credit_ledger", () => {
 
   test("credit can be applied but never taken below zero; amounts must be positive", async () => {
     const months = await sequelize.query(
-      `INSERT INTO student_fee_months (fk_school_id, fk_student_id, month, fee_type, base_amount, discount_amount, net_amount, paid_amount, status, created_at, updated_at)
-       VALUES (${school.id}, ${student.id}, '2026-11', 'Tuition', 4500, 0, 4500, 0, 'Unpaid', NOW(), NOW()) RETURNING id`,
+      `INSERT INTO student_fee_months (fk_school_id, fk_student_id, month, fee_type, base_amount, discount_amount, net_amount, paid_amount, status, adjustment_total, collectible_amount, created_at, updated_at)
+       VALUES (${school.id}, ${student.id}, '2026-11', 'Tuition', 4500, 0, 4500, 0, 'Unpaid', 0, 4500, NOW(), NOW()) RETURNING id`,
       { type: sequelize.QueryTypes.SELECT },
     );
     await creditService.applyCredit(actor(), { studentId: student.id, amount: 500, feeMonthId: months[0].id });
@@ -137,12 +141,12 @@ describe("migration 062 other income, expense payment method, DECIMAL(12,2)", ()
   test("all fee money columns are NUMERIC(12,2)", async () => {
     const rows = await sequelize.query(
       `SELECT table_name || '.' || column_name AS col, numeric_precision AS p, numeric_scale AS s FROM information_schema.columns
-       WHERE table_schema = 'public' AND (table_name, column_name) IN (('classes','monthly_tuition_fee'),('students','fixed_monthly_fee'),('expenses','amount'),
+       WHERE table_schema = 'public' AND (table_name, column_name) IN (('students','fixed_monthly_fee'),('expenses','amount'),
          ('fee_payments','amount_paid'),('fee_payments','unallocated_amount'),('fee_allocations','allocated_amount'),('student_fee_months','base_amount'),
          ('student_fee_months','discount_amount'),('student_fee_months','net_amount'),('student_fee_months','paid_amount'))`,
       { type: sequelize.QueryTypes.SELECT },
     );
-    expect(rows).toHaveLength(10);
+    expect(rows).toHaveLength(9);
     for (const r of rows) expect([r.col, r.p, r.s]).toEqual([r.col, 12, 2]);
   });
 });
@@ -152,6 +156,8 @@ describe("finance permissions and validation scaffolding", () => {
     for (const perm of ["fees.structure.read", "fees.structure.update", "fees.credit.read", "fees.import", "income.read", "income.create", "income.manage"]) {
       expect(can("operations_manager", perm)).toBe(false);
       expect(can("teacher", perm)).toBe(false);
+      expect(isGrantable("operations_manager", perm)).toBe(false);
+      expect(isGrantable("teacher", perm)).toBe(false);
     }
     expect(can("accountant", "fees.structure.read")).toBe(true);
     expect(can("accountant", "fees.structure.update")).toBe(false);

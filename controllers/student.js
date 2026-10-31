@@ -25,8 +25,16 @@ module.exports = {
   getById: async (req, res, next) => {
     try {
       await accessService.assertStudentAccess(req.user, req.params.id);
-      const data = await studentService.getById(req.params.id, req.user.schoolId);
+      const data = await studentService.withPhotoUrl(await studentService.getById(req.params.id, req.user.schoolId));
       res.status(200).json({ success: true, message: "Student", data });
+    } catch (err) {
+      next(err);
+    }
+  },
+  setPhoto: async (req, res, next) => {
+    try {
+      const data = await studentService.setPhoto(req.params.id, req.user.schoolId, req.body.photo);
+      res.status(200).json({ success: true, message: "Student photo saved", data });
     } catch (err) {
       next(err);
     }

@@ -27,5 +27,6 @@ module.exports = {
   financeController: require("./finance"),
   noticeController: require("./notice"),
   leaveController: require("./leave"),
-  reportController: require("./report"),
+  dashboardController: require("./dashboard"),
+  roleController: require("./role"),
 };

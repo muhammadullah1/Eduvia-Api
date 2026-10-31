@@ -4,7 +4,7 @@ Sources: SRS §4.2, §10; addendum §15.3–15.4; BR-01, BR-02, BR-13; P1-01.
 
 ## School
 
-A school is the tenant. Users, sessions, classes, subjects, students, teachers, parents, fees, and exams belong to one school. Codes and emails used as school identifiers are unique.
+A school is the tenant. Eduvia is multi-tenant SaaS: each campus or branch is a separate school, even under one brand, with its own fees, roles, settings and reports. Users, sessions, classes, subjects, students, teachers, parents, fees, and exams belong to one school. Codes and emails used as school identifiers are unique.
 
 ## Academic session
 
@@ -49,6 +49,6 @@ Stored per school, not hardcoded in screens.
 |---|---|---|
 | `dailyTestRules` | super_admin, operations_manager | pass 40%, max fails per month 1, LowMarks on, at least 3 passes, below 55% |
 | `resultVisibility` | super_admin | fee rule `all_due_paid`, override reason required |
-| `fees` | super_admin | default monthly fee, due day 10, max advance months 12 |
+| `fees` | super_admin | due day 10, max advance months 12, concessions toggle. No default fee amount: amounts live only in class Fee Structure. |
 
 Academic rules and fee rules are different permissions. Operations Manager does not change fee or result-visibility settings.

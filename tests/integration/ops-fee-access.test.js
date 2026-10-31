@@ -8,14 +8,16 @@
  * (read-only) without fee entries.
  */
 const app = require("../../app");
-const { sequelize, Classes } = require("../../models");
+const { sequelize } = require("../../models");
+const { tuitionForMonth } = require("../../services/fee_structure.service");
 const { today } = require("../../utils/dates");
 const { makeSchool, makeUser, tokenFor, makeClass, makeStudent } = require("../helpers/school");
 const { request } = require("../helpers/http");
 
 const call = (token, method, path, body) => request(app, { method, path: `/api${path}`, token, body });
-const FEE_KEYS = /"(monthlyFee|monthlyTuitionFee|monthly_tuition_fee|fixedMonthlyFee|fixed_monthly_fee|outstandingAmount|outstanding_amount|financialStatus)"/;
+const FEE_KEYS = /"(monthlyFee|fixedMonthlyFee|fixed_monthly_fee|outstandingAmount|outstanding_amount|financialStatus)"/;
 const MONTH = today().slice(0, 7);
+const OPS_TUITION = 3000;
 
 describe("operations manager fee access", () => {
   let school; let session; let klass; let student; let tok;
@@ -30,8 +32,7 @@ describe("operations manager fee access", () => {
       teacher: await makeUser(school.id, "teacher"),
     };
     tok = Object.fromEntries(Object.entries(users).map(([k, u]) => [k, tokenFor(u)]));
-    klass = await makeClass(school.id, session.id, "Ops A");
-    await Classes.update({ monthlyTuitionFee: 3000 }, { where: { id: klass.id } });
+    klass = await makeClass(school.id, session.id, "Ops A", OPS_TUITION);
     student = await makeStudent(school.id, klass.id, { firstName: "Dues" });
     expect((await call(tok.admin, "POST", "/fees/months/generate", { month: MONTH })).status).toBe(201);
     expect((await call(tok.admin, "POST", "/fees/payments", { studentId: student.id, amount: 100, paidOn: today(), method: "Cash" })).status).toBe(201);
@@ -55,13 +56,13 @@ describe("operations manager fee access", () => {
     const one = await call(tok.ops, "GET", `/classes/${klass.id}`);
     expect(JSON.stringify(one.body)).not.toMatch(FEE_KEYS);
     const admin = await call(tok.admin, "GET", "/classes");
-    expect(JSON.stringify(admin.body)).toMatch(/monthlyTuitionFee/);
+    expect(JSON.stringify(admin.body)).toMatch(/monthlyFee/);
   });
 
   it("ignores a class fee sent by Ops", async () => {
     const res = await call(tok.ops, "PATCH", `/classes/${klass.id}`, { monthlyFee: 1 });
     expect(res.status).toBe(200);
-    expect(Number((await Classes.findByPk(klass.id)).monthlyTuitionFee)).toBe(3000);
+    expect(await tuitionForMonth(klass.id, MONTH)).toBe(OPS_TUITION);
   });
 
   it("shows strike-off dues to Ops only as a yes/no flag", async () => {

@@ -1,10 +1,21 @@
 "use strict";
 
-const { Schools, AcademicSessions, Users, Classes, Students, Parents, StudentParents } = require("../../models");
+const {
+  Schools,
+  AcademicSessions,
+  Users,
+  Classes,
+  Students,
+  Parents,
+  StudentParents,
+  FeeStructures,
+} = require("../../models");
 const { generateToken } = require("../../utils");
+const permissionService = require("../../services/permission.service");
 
 let counter = 0;
-const uid = () => `${Date.now()}${(counter += 1)}`;
+const WORKER = process.env.JEST_WORKER_ID || "0";
+const uid = () => `${WORKER}${Date.now().toString(36)}${(counter += 1)}`;
 
 async function makeSchool() {
   const stamp = uid();
@@ -35,8 +46,30 @@ async function makeUser(schoolId, role) {
 const tokenFor = (user, expiresIn = "15m") =>
   generateToken({ id: user.id, schoolId: user.fkSchoolId, role: user.role, email: user.email }, expiresIn);
 
-async function makeClass(schoolId, sessionId, label = `Class ${uid()}`) {
-  return Classes.create({ fkSchoolId: schoolId, fkSessionId: sessionId, grade: label, section: "A", label, monthlyTuitionFee: 1000, capacity: 30 });
+/**
+ * Creates a class with Tuition Fee Structure amount 1000 (billing no longer falls
+ * back to a school-wide default or the class column alone).
+ */
+async function makeClass(schoolId, sessionId, label = `Class ${uid()}`, amount = 1000) {
+  const tuition = Number(amount) || 1000;
+  const klass = await Classes.create({
+    fkSchoolId: schoolId,
+    fkSessionId: sessionId,
+    grade: label,
+    section: "A",
+    label,
+    capacity: 30,
+  });
+  await FeeStructures.create({
+    fkSchoolId: schoolId,
+    fkSessionId: sessionId,
+    fkClassId: klass.id,
+    feeType: "Tuition",
+    frequency: "Monthly",
+    amount: tuition,
+    effectiveFrom: "2026-04-01",
+  });
+  return klass;
 }
 
 async function makeStudent(schoolId, classId, extra = {}) {
@@ -62,4 +95,15 @@ async function makeParent(schoolId, studentId) {
   return user;
 }
 
-module.exports = { makeSchool, makeUser, tokenFor, makeClass, makeStudent, makeParent, uid };
+/** A service-level actor shaped like `req.user`, including the role's effective permissions. */
+async function actorFor(user) {
+  return {
+    id: user.id,
+    schoolId: user.fkSchoolId,
+    role: user.role,
+    email: user.email,
+    permissions: await permissionService.permissionsFor(user.fkSchoolId, user.role),
+  };
+}
+
+module.exports = { actorFor, makeSchool, makeUser, tokenFor, makeClass, makeStudent, makeParent, uid };

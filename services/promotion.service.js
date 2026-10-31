@@ -10,6 +10,7 @@ const ApiError = require("../utils/ApiError");
 const auditService = require("./audit.service");
 const { syncClassStatus } = require("./class.service");
 const lifecycle = require("./lifecycle.service");
+const feeService = require("./fee.service");
 
 const ACTIONS = { PROMOTE: "promote", HOLD: "hold", GRADUATE: "graduate" };
 const OUTCOME = { PROMOTED: "Promoted", REPEATED: "Repeated" };
@@ -120,8 +121,12 @@ async function bulkPromote(actor, input) {
         outcome: entry.action === ACTIONS.PROMOTE ? OUTCOME.PROMOTED : OUTCOME.REPEATED,
       }, { transaction });
       if (student.fkClassId !== target.id) await student.update({ fkClassId: target.id }, { transaction });
-      if (entry.action === ACTIONS.PROMOTE) summary.promoted += 1;
-      else summary.repeated += 1;
+      if (entry.action === ACTIONS.PROMOTE) {
+        await feeService.billPromotionIfConfigured(actor, student, target, date, transaction);
+        summary.promoted += 1;
+      } else {
+        summary.repeated += 1;
+      }
     }
 
     await syncClassStatus([fromClass.id, toClass && toClass.id, repeatClass && repeatClass.id], transaction);

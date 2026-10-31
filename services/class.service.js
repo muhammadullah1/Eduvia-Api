@@ -110,21 +110,30 @@ async function attachStats(rows) {
   });
 }
 
+/** Attach the Tuition in force as `monthlyFee` (a virtual attribute) to each class row. */
+async function withFees(rows) {
+  const amounts = await feeStructureService().currentTuitionByClass(rows);
+  for (const row of rows) row.setDataValue("monthlyFee", amounts.get(row.id) ?? 0);
+  return rows;
+}
+
+async function withFee(row) {
+  await withFees([row]);
+  return row;
+}
+
 async function list(schoolId, { sessionId, includeStats, archived } = {}) {
   const where = { fkSchoolId: schoolId };
   if (sessionId) where.fkSessionId = sessionId;
 
   if (archived) {
     where.archived_at = { [Op.ne]: null };
-    const rows = await Classes.findAll({
-      where,
-      paranoid: false,
-    });
-    if (!includeStats) return sortClasses(rows);
-    return attachStats(sortClasses(rows));
+    const rows = sortClasses(await withFees(await Classes.findAll({ where, paranoid: false })));
+    if (!includeStats) return rows;
+    return attachStats(rows);
   }
 
-  const rows = sortClasses(await Classes.findAll({ where }));
+  const rows = sortClasses(await withFees(await Classes.findAll({ where })));
   if (!includeStats) return rows;
   return attachStats(rows);
 }
@@ -149,10 +158,12 @@ async function create(schoolId, data) {
     );
   }
   // A new class has no students yet, so it starts Inactive.
-  const row = await Classes.create({ ...data, fkSchoolId: schoolId, status: "Inactive" });
+  const fields = { ...data };
+  delete fields.monthlyFee;
+  const row = await Classes.create({ ...fields, fkSchoolId: schoolId, status: "Inactive" });
   // The class form's fee becomes the class's first Tuition row (fee structure is the source of truth).
-  if (Number(row.monthlyTuitionFee) > 0) await feeStructureService().recordClassFee(row, { isNew: true });
-  return row;
+  if (Number(data.monthlyFee) > 0) await feeStructureService().recordClassFee(row, Number(data.monthlyFee), { isNew: true });
+  return withFee(row);
 }
 
 async function update(id, schoolId, data) {
@@ -168,10 +179,11 @@ async function update(id, schoolId, data) {
   // Status follows enrolment (syncClassStatus); it is never set by hand.
   const changes = { ...data };
   delete changes.status;
-  const feeBefore = Number(row.monthlyTuitionFee);
+  delete changes.monthlyFee;
+  // Validate the structure lock before mutating the class row; recordClassFee skips an unchanged amount.
+  if (data.monthlyFee !== undefined) await feeStructureService().recordClassFee(row, Number(data.monthlyFee));
   await row.update(changes);
-  if (Number(row.monthlyTuitionFee) !== feeBefore) await feeStructureService().recordClassFee(row);
-  return row;
+  return withFee(row);
 }
 
 async function remove(id, schoolId) {
@@ -207,7 +219,7 @@ async function restore(id, schoolId) {
 
   await row.restore();
   await row.update({ status: (await enrolledCount(row.id)) > 0 ? "Active" : "Inactive" });
-  return row;
+  return withFee(row);
 }
 
 module.exports = {

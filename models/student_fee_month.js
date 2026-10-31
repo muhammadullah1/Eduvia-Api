@@ -30,6 +30,7 @@ module.exports = (sequelize, DataTypes) => {
           "Admission",
           "Exam",
           "Annual",
+          "Promotion",
           "Transport",
           "Other"
         ),
@@ -69,6 +70,23 @@ module.exports = (sequelize, DataTypes) => {
         allowNull: true,
         field: "due_date",
       },
+      adjustmentTotal: {
+        type: DataTypes.DECIMAL(12, 2),
+        allowNull: false,
+        defaultValue: 0.0,
+        field: "adjustment_total",
+      },
+      collectibleAmount: {
+        type: DataTypes.DECIMAL(12, 2),
+        allowNull: false,
+        defaultValue: 0,
+        field: "collectible_amount",
+      },
+      concessionSnapshot: {
+        type: DataTypes.JSONB,
+        allowNull: true,
+        field: "concession_snapshot",
+      },
     },
     {
       tableName: "student_fee_months",
@@ -78,8 +96,22 @@ module.exports = (sequelize, DataTypes) => {
       updatedAt: "updated_at",
       deletedAt: "archived_at",
       underscored: true,
+      hooks: {
+        beforeValidate(instance) {
+          if (!instance.isNewRecord) return;
+          let net = instance.netAmount;
+          if (net == null) net = instance.getDataValue("netAmount");
+          if (net == null) return;
+          // Mirror net unless the caller explicitly set collectibleAmount.
+          if (!instance.changed("collectibleAmount")) {
+            instance.setDataValue("collectibleAmount", net);
+          }
+        },
+      },
       getterMethods: {
         amountDue() {
+          const collectible = this.getDataValue("collectibleAmount");
+          if (collectible != null) return collectible;
           return this.getDataValue("netAmount");
         },
         amountPaid() {
@@ -88,7 +120,7 @@ module.exports = (sequelize, DataTypes) => {
       },
       setterMethods: {
         amountDue(val) {
-          this.setDataValue("netAmount", val);
+          this.setDataValue("collectibleAmount", val);
         },
         amountPaid(val) {
           this.setDataValue("paidAmount", val);
@@ -109,6 +141,10 @@ module.exports = (sequelize, DataTypes) => {
     StudentFeeMonth.hasMany(models.FeeAllocations, {
       foreignKey: "fkFeeMonthId",
       as: "allocations",
+    });
+    StudentFeeMonth.hasMany(models.StudentFeeMonthAdjustments, {
+      foreignKey: "fkFeeMonthId",
+      as: "adjustments",
     });
   };
 

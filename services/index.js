@@ -33,6 +33,8 @@ module.exports = {
   noticeService: require("./notice.service"),
   emailService: require("./email.service"),
   leaveService: require("./leave.service"),
-  reportService: require("./report.service"),
+  dashboardService: require("./dashboard.service"),
   documentService: require("./document.service"),
+  permissionService: require("./permission.service"),
+  roleService: require("./role.service"),
 };

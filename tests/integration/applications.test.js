@@ -3,7 +3,8 @@
 const applicationService = require("../../services/application.service");
 const studentService = require("../../services/student.service");
 const { serializeApplication } = require("../../utils/applicationSerializer");
-const { sequelize, Schools, AcademicSessions, Users, Classes } = require("../../models");
+const { sequelize, Schools, AcademicSessions, Users, Classes, ApplicationDocuments } = require("../../models");
+const { REQUIRED_ADMISSION_DOCUMENTS } = require("../../constants/admissions");
 const { USER_ROLES } = require("../../constants");
 const ApiError = require("../../utils/ApiError");
 
@@ -37,7 +38,6 @@ async function buildFixture() {
     label: "Grade 1 · A",
     grade: "1",
     section: "A",
-    monthlyTuitionFee: 1000,
     capacity: 30,
   });
   return { school, session, admin, klass, stamp };
@@ -142,6 +142,62 @@ describe("application service", () => {
     });
     expect(draft.id).toBeTruthy();
     expect(draft.documents.length).toBeGreaterThan(0);
+  });
+
+  test("re-saving the document checklist (draft ids or none) never duplicates it", async () => {
+    const fx = await buildFixture();
+    const checklist = [
+      { id: "birth", label: "Birth Certificate / B-Form", status: "Pending" },
+      { id: "cnic", label: "Guardian ID Copy (CNIC)", status: "Pending" },
+    ];
+    const draft = await applicationService.createDraft(fx.school.id, { name: "Repeat Saver", fkClassId: fx.klass.id, documents: checklist });
+    await applicationService.update(draft.id, fx.school.id, { documents: checklist });
+    await applicationService.update(draft.id, fx.school.id, { documents: checklist.map(({ label, status }) => ({ label, status })) });
+    const saved = await applicationService.update(draft.id, fx.school.id, {
+      documents: [{ label: "Guardian ID Copy (CNIC)", status: "Uploaded", fileUrl: "https://example.com/cnic.pdf" }],
+    });
+    expect(saved.documents.map((d) => d.label).sort()).toEqual([...REQUIRED_ADMISSION_DOCUMENTS].sort());
+    expect(saved.documents.find((d) => d.label === "Guardian ID Copy (CNIC)").status).toBe("Uploaded");
+  });
+
+  test("a new application gets exactly the 4 required documents, all Pending, and no Medical record", async () => {
+    const fx = await buildFixture();
+    const bare = await applicationService.createDraft(fx.school.id, { name: "Bare Draft", fkClassId: fx.klass.id });
+    const partial = await applicationService.createDraft(fx.school.id, {
+      name: "Partial Draft",
+      fkClassId: fx.klass.id,
+      documents: [{ label: "Birth Certificate / B-Form", status: "Pending" }],
+    });
+    [bare, partial].forEach((app) => {
+      expect(app.documents.map((d) => d.label).sort()).toEqual([...REQUIRED_ADMISSION_DOCUMENTS].sort());
+      expect(app.documents.every((d) => d.status === "Pending")).toBe(true);
+      expect(app.documents.some((d) => /medical/i.test(d.label))).toBe(false);
+    });
+    expect(applicationService.documentChecklist()).toEqual(REQUIRED_ADMISSION_DOCUMENTS.map((label) => ({ label, status: "Pending" })));
+  });
+
+  test("editing the checklist many times keeps 4 rows and their ids", async () => {
+    const fx = await buildFixture();
+    const draft = await applicationService.createDraft(fx.school.id, { name: "Many Saves", fkClassId: fx.klass.id });
+    const ids = draft.documents.map((d) => d.id).sort();
+    let latest = draft;
+    for (const status of ["Uploaded", "Verified", "Rejected", "Pending", "Uploaded"]) {
+      latest = await applicationService.update(draft.id, fx.school.id, {
+        documents: latest.documents.map((d) => ({ id: d.id, label: d.label, status })),
+      });
+    }
+    expect(latest.documents.map((d) => d.id).sort()).toEqual(ids);
+    expect(latest.documents.every((d) => d.status === "Uploaded")).toBe(true);
+    const rows = await ApplicationDocuments.count({ where: { fkApplicationId: draft.id } });
+    expect(rows).toBe(REQUIRED_ADMISSION_DOCUMENTS.length);
+  });
+
+  test("the database refuses a second row for the same document", async () => {
+    const fx = await buildFixture();
+    const draft = await applicationService.createDraft(fx.school.id, { name: "Unique Guard", fkClassId: fx.klass.id });
+    await expect(
+      ApplicationDocuments.create({ fkApplicationId: draft.id, title: "Birth Certificate / B-Form", status: "Pending", documentType: "admission" }),
+    ).rejects.toThrow();
   });
 
   test("list defaults to page 1 and pageSize 10", async () => {

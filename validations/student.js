@@ -29,6 +29,10 @@ module.exports = {
       admittedOn: Joi.date().iso().allow(null),
     }).min(1),
   },
+  validatePhoto: {
+    params: Joi.object({ id: id.required() }),
+    body: Joi.object({ photo: Joi.string().trim().max(500).allow(null).required() }),
+  },
   validateStatus: {
     params: Joi.object({ id: id.required() }),
     body: Joi.object({

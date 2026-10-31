@@ -14,8 +14,8 @@ const {
   AcademicSessions,
   sequelize,
 } = require("../models");
-const { USER_ROLES, PAYMENT_STATUS, FEE_MONTH_STATUS, ALLOCATION_MODE, SETTING_KEYS, STUDENT_STATUS } = require("../constants");
-const { can } = require("../constants/permissions");
+const { USER_ROLES, PAYMENT_STATUS, ALLOCATION_MODE, SETTING_KEYS, STUDENT_STATUS } = require("../constants");
+const { hasPermission } = require("./permission.service");
 const ApiError = require("../utils/ApiError");
 const accessService = require("./access.service");
 const auditService = require("./audit.service");
@@ -47,9 +47,20 @@ function stepMonth(stamp, count = 1) {
 
 const studentAttributes = ["id", "firstName", "lastName", "admissionNo", "fkClassId"];
 
+function collectibleOf(row) {
+  const plain = row.get ? row.get({ plain: true }) : row;
+  if (plain.collectibleAmount != null && plain.collectibleAmount !== "") return Number(plain.collectibleAmount);
+  if (row.getDataValue) {
+    const c = row.getDataValue("collectibleAmount");
+    if (c != null && c !== "") return Number(c);
+    return Number(row.getDataValue("netAmount"));
+  }
+  return Number(plain.netAmount ?? plain.amountDue ?? 0);
+}
+
 function presentMonth(row, currentMonth = monthStamp(today())) {
   const plain = row.get ? row.get({ plain: true }) : row;
-  const amountDue = Number(plain.netAmount ?? plain.amountDue ?? 0);
+  const amountDue = collectibleOf(row);
   const amountPaid = Number(plain.paidAmount ?? plain.amountPaid ?? 0);
   const view = { ...plain, amountDue, amountPaid };
   return {
@@ -59,29 +70,27 @@ function presentMonth(row, currentMonth = monthStamp(today())) {
     feeType: plain.feeType,
     amountDue,
     amountPaid,
-    balance: outstanding(view), // fee_allocation's exported outstanding() already returns rupees
+    originalNet: Number(plain.netAmount ?? amountDue),
+    adjustmentTotal: Number(plain.adjustmentTotal ?? 0),
+    discountAmount: Number(plain.discountAmount ?? 0),
+    balance: outstanding(view),
     status: feeMonthStatus(view, currentMonth),
     dueDate: plain.dueDate,
   };
 }
 
 /**
- * Tuition billed to `student` for `month` (YYYY-MM):
- * 1. the student's fixed monthly fee override, when set;
- * 2. the class fee structure in force on the 1st of the month (Finance Step 3);
- * 3. the class fee column (classes with no structure rows yet);
- * 4. the school default.
+ * Tuition base billed to `student` for `month` (YYYY-MM), before concessions.
+ * Amounts come only from the class Fee Structure. Returns null when Tuition is
+ * missing or not configured (null / ≤ 0). Approved student concessions adjust
+ * the bill at generation time (snapshotted); fixed_monthly_fee is legacy only.
+ * discount_percent is never applied. There is no school-wide fallback.
  */
 async function monthlyFeeFor(schoolId, student, transaction, month = today()) {
-  if (Number(student.fixedMonthlyFee) > 0) return Number(student.fixedMonthlyFee);
-  if (student.fkClassId) {
-    const structured = await feeStructureService.tuitionForMonth(student.fkClassId, month, { transaction });
-    // A 0 row (backfilled from a class with no fee) means "use the school default", as before.
-    if (structured !== null && structured > 0) return structured;
-  }
-  const klass = student.fkClassId ? await Classes.findByPk(student.fkClassId, { transaction }) : null;
-  if (klass && Number(klass.monthlyFee) > 0) return Number(klass.monthlyFee);
-  return (await settingsService.get(schoolId, SETTING_KEYS.FEES, { transaction })).defaultMonthlyFee;
+  if (!student.fkClassId) return null;
+  const structured = await feeStructureService.tuitionForMonth(student.fkClassId, month, { transaction });
+  if (structured === null || structured <= 0) return null;
+  return structured;
 }
 
 function isoDay(value) {
@@ -92,7 +101,7 @@ function ledgerView(row) {
   return {
     id: row.id,
     month: row.month,
-    amountDue: Number(row.getDataValue("netAmount")),
+    amountDue: collectibleOf(row),
     amountPaid: Number(row.getDataValue("paidAmount")),
   };
 }
@@ -121,26 +130,97 @@ function dueDateFor(student, month, dueDay) {
   return grace.toISOString().slice(0, 10);
 }
 
-/** Create one bill (fee type) for a ledger month; returns the row when it is new, else null. */
+/**
+ * Create one bill (fee type) for a ledger month; returns the row when it is new, else null.
+ * Applies the student's single Approved concession (if any) and snapshots it on the bill.
+ */
 async function createBill(schoolId, student, month, feeType, amountDue, dueDay, transaction) {
-  const [row, created] = await StudentFeeMonths.findOrCreate({
+  const existing = await StudentFeeMonths.findOne({
     where: { fkStudentId: student.id, month, feeType },
-    defaults: {
-      fkSchoolId: schoolId,
-      baseAmount: amountDue,
-      discountAmount: 0,
-      netAmount: amountDue,
-      paidAmount: 0,
-      status: FEE_MONTH_STATUS.UNPAID,
-      dueDate: dueDateFor(student, month, dueDay),
-    },
     transaction,
   });
-  return created ? row : null;
+  if (existing) return null;
+
+  let base = Number(amountDue);
+  let discount = 0;
+  let net = base;
+  let snapshot = null;
+  const onDate = feeType === "Admission" && student.admittedOn
+    ? String(student.admittedOn).slice(0, 10)
+    : `${monthStamp(month)}-01`;
+
+  const feeConcessionService = require("./fee_concession.service");
+  const resolved = await feeConcessionService.resolveForBill(
+    schoolId,
+    student,
+    feeType,
+    base,
+    onDate,
+    { transaction },
+  );
+  discount = resolved.discount;
+  net = resolved.net;
+  snapshot = resolved.snapshot;
+
+  const status = feeMonthStatus(
+    { amountDue: net, amountPaid: 0, month },
+    monthStamp(today()),
+  );
+  const row = await StudentFeeMonths.create(
+    {
+      fkSchoolId: schoolId,
+      fkStudentId: student.id,
+      month,
+      feeType,
+      baseAmount: base,
+      discountAmount: discount,
+      netAmount: net,
+      adjustmentTotal: 0,
+      collectibleAmount: net,
+      concessionSnapshot: snapshot,
+      paidAmount: 0,
+      status,
+      dueDate: dueDateFor(student, month, dueDay),
+    },
+    { transaction },
+  );
+  return row;
 }
 
 async function createMonth(schoolId, student, month, amountDue, dueDay, transaction) {
   return createBill(schoolId, student, month, "Tuition", amountDue, dueDay, transaction);
+}
+
+/**
+ * Bill the target class's Promotion fee once for this promotion month.
+ * Skips when Promotion is missing or amount ≤ 0. Never rewrites existing bills.
+ * Concession RejectConflict skips the bill; the promotion itself still stands.
+ */
+async function billPromotionIfConfigured(actor, student, toClass, promotedOn, transaction) {
+  if (!toClass || !toClass.id) return null;
+  const onDay = isoDay(promotedOn);
+  const map = await feeStructureService.inForce(toClass.id, onDay, {
+    transaction,
+    feeType: "Promotion",
+  });
+  const structure = map.get("Promotion");
+  if (!structure) return null;
+  const amount = Number(structure.amount);
+  if (!(amount > 0)) return null;
+
+  const { dueDay } = await settingsService.get(actor.schoolId, SETTING_KEYS.FEES, { transaction });
+  const month = monthStamp(onDay);
+  const bill = await createBill(
+    actor.schoolId,
+    student,
+    month,
+    "Promotion",
+    amount,
+    dueDay,
+    transaction,
+  );
+  if (bill && bill.conflict) return null;
+  return bill;
 }
 
 const sessionCache = new WeakMap();
@@ -241,19 +321,51 @@ async function ensureMonthsThrough(schoolId, student, to, transaction, actor = n
   const resume = await resumeMonth(student.id, transaction);
   if (resume && resume > month) month = resume;
   const created = [];
+  const conflicts = [];
+  const missingStructures = [];
   for (; month <= target; month = stepMonth(month, 1)) {
     const amountDue = await monthlyFeeFor(schoolId, student, transaction, month);
-    const tuition = await createMonth(schoolId, student, month, amountDue, dueDay, transaction);
-    if (!tuition) continue; // month already billed: never add fees to an existing month
-    created.push(tuition);
+    let openNewMonth = false;
+
+    if (amountDue === null) {
+      const existingTuition = await StudentFeeMonths.findOne({
+        where: { fkStudentId: student.id, month, feeType: "Tuition" },
+        transaction,
+      });
+      if (existingTuition) continue;
+      missingStructures.push({
+        studentId: student.id,
+        classId: student.fkClassId || null,
+        feeType: "Tuition",
+        month,
+      });
+      openNewMonth = true;
+    } else {
+      const tuition = await createMonth(schoolId, student, month, amountDue, dueDay, transaction);
+      if (tuition && tuition.conflict) {
+        conflicts.push({ studentId: student.id, ...tuition });
+        continue;
+      }
+      if (!tuition) continue;
+      created.push(tuition);
+      openNewMonth = true;
+    }
+
+    if (!openNewMonth) continue;
     for (const [feeType, amount] of await extraBillsFor(schoolId, student, month, transaction)) {
       const bill = await createBill(schoolId, student, month, feeType, amount, dueDay, transaction);
+      if (bill && bill.conflict) {
+        conflicts.push({ studentId: student.id, ...bill });
+        continue;
+      }
       if (bill) created.push(bill);
     }
   }
   if (created.length) {
     await creditLedgerService.applyToOpenBills(actor || creditLedgerService.systemActor(schoolId), student.id, { transaction, currentMonth: monthStamp(today()) });
   }
+  created.conflicts = conflicts;
+  created.missingStructures = missingStructures;
   return created;
 }
 
@@ -280,41 +392,74 @@ async function runGeneration(actor, { month, classId }, { dryRun }) {
     const labels = new Map(classes.map((k) => [k.id, k.label]));
     const carried = students.length
       ? await StudentFeeMonths.findAll({
-        where: { fkStudentId: students.map((st) => st.id), month: { [Op.lt]: target }, paidAmount: { [Op.lt]: col("net_amount") } },
-        attributes: ["fkStudentId", "netAmount", "paidAmount"],
+        where: { fkStudentId: students.map((st) => st.id), month: { [Op.lt]: target }, paidAmount: { [Op.lt]: col("collectible_amount") } },
+        attributes: ["fkStudentId", "collectibleAmount", "netAmount", "paidAmount"],
         transaction,
       })
       : [];
     const carriedBy = new Map();
     for (const row of carried) {
-      const owed = cents(row.getDataValue("netAmount")) - cents(row.getDataValue("paidAmount"));
+      const owed = cents(collectibleOf(row)) - cents(row.getDataValue("paidAmount"));
       carriedBy.set(row.fkStudentId, (carriedBy.get(row.fkStudentId) || 0) + owed);
     }
 
     const byClass = new Map();
+    const concessionConflicts = [];
+    const missingByKey = new Map();
     for (const student of students) {
       await sequelize.query("SELECT pg_advisory_xact_lock(hashtext(:key))", { replacements: { key: `fees:${student.id}` }, transaction });
       const created = await ensureMonthsThrough(actor.schoolId, student, target, transaction, actor);
+      if (created.conflicts?.length) concessionConflicts.push(...created.conflicts);
+      if (created.missingStructures?.length) {
+        for (const miss of created.missingStructures) {
+          const classLabel = labels.get(miss.classId) || "No class";
+          const missKey = `${miss.classId || 0}:${miss.feeType}`;
+          let entry = missingByKey.get(missKey);
+          if (!entry) {
+            entry = {
+              classId: miss.classId,
+              label: classLabel,
+              feeType: miss.feeType,
+              studentIds: new Set(),
+              message: `No fee structure for ${classLabel} / ${miss.feeType}`,
+            };
+            missingByKey.set(missKey, entry);
+          }
+          entry.studentIds.add(miss.studentId);
+        }
+      }
       const key = student.fkClassId || 0;
       if (!byClass.has(key)) {
-        byClass.set(key, { classId: student.fkClassId, label: labels.get(student.fkClassId) || "No class", students: 0, billedStudents: 0, skippedStudents: 0, bills: 0, dueCents: 0, carriedCents: 0, byType: {}, sampleStudentId: student.id });
+        byClass.set(key, { classId: student.fkClassId, label: labels.get(student.fkClassId) || "No class", students: 0, billedStudents: 0, skippedStudents: 0, missingStructureStudents: 0, bills: 0, dueCents: 0, carriedCents: 0, byType: {}, sampleStudentId: student.id });
       }
       const group = byClass.get(key);
       group.students += 1;
       group.carriedCents += carriedBy.get(student.id) || 0;
+      const missedTuition = (created.missingStructures || []).some((m) => m.feeType === "Tuition");
+      if (missedTuition) group.missingStructureStudents += 1;
       if (created.length) {
         group.billedStudents += 1;
         if (!group.sampleBilled) { group.sampleStudentId = student.id; group.sampleBilled = true; }
       } else group.skippedStudents += 1;
       group.bills += created.length;
       for (const row of created) {
-        const amount = cents(row.getDataValue("netAmount"));
+        const amount = cents(collectibleOf(row));
         group.dueCents += amount;
         const t = (group.byType[row.feeType] ||= { bills: 0, cents: 0 });
         t.bills += 1;
         t.cents += amount;
       }
     }
+
+    const missingStructures = [...missingByKey.values()]
+      .map((entry) => ({
+        classId: entry.classId,
+        label: entry.label,
+        feeType: entry.feeType,
+        studentCount: entry.studentIds.size,
+        message: entry.message,
+      }))
+      .sort((a, b) => a.message.localeCompare(b.message, undefined, { numeric: true }));
 
     const groups = [...byClass.values()].sort((a, b) => a.label.localeCompare(b.label, undefined, { numeric: true }));
     const classesOut = groups.map((g) => ({
@@ -323,6 +468,7 @@ async function runGeneration(actor, { month, classId }, { dryRun }) {
       students: g.students,
       billedStudents: g.billedStudents,
       skippedStudents: g.skippedStudents,
+      missingStructureStudents: g.missingStructureStudents,
       bills: g.bills,
       totalDue: money2(g.dueCents),
       outstandingCarried: money2(g.carriedCents),
@@ -333,11 +479,25 @@ async function runGeneration(actor, { month, classId }, { dryRun }) {
       students: students.length,
       billedStudents: groups.reduce((n, g) => n + g.billedStudents, 0),
       skippedStudents: groups.reduce((n, g) => n + g.skippedStudents, 0),
+      missingStructureStudents: groups.reduce((n, g) => n + g.missingStructureStudents, 0),
       bills: groups.reduce((n, g) => n + g.bills, 0),
       totalDue: money2(groups.reduce((n, g) => n + g.dueCents, 0)),
       outstandingCarried: money2(groups.reduce((n, g) => n + g.carriedCents, 0)),
     };
-    const result = { month: target, label: monthLabel(target), classId: classId || null, dryRun, students: students.length, classes: classesOut, totals };
+    const result = {
+      month: target,
+      label: monthLabel(target),
+      classId: classId || null,
+      dryRun,
+      students: students.length,
+      classes: classesOut,
+      totals,
+      concessionConflicts,
+      missingStructures,
+      // Missing-structure students are never billed. Confirm is allowed when there
+      // is something to generate, or when nothing is missing (already up to date).
+      canConfirm: missingStructures.length === 0 || totals.bills > 0,
+    };
 
     if (dryRun) {
       await transaction.rollback();
@@ -348,7 +508,7 @@ async function runGeneration(actor, { month, classId }, { dryRun }) {
       }, { transaction });
       await transaction.commit();
     }
-    return can(actor.role, "fees.totals") ? result : withoutMoney(result);
+    return hasPermission(actor, "fees.totals") ? result : withoutMoney(result);
   } catch (err) {
     if (!transaction.finished) await transaction.rollback();
     throw err;
@@ -401,7 +561,18 @@ async function studentLedger(user, studentId) {
     }
     entry.dueCents += cents(bill.amountDue);
     entry.paidCents += cents(bill.amountPaid);
-    entry.bills.push({ id: bill.id, feeType: bill.feeType, due: bill.amountDue, paid: bill.amountPaid, outstanding: bill.balance, status: bill.status, dueDate: bill.dueDate });
+    entry.bills.push({
+      id: bill.id,
+      feeType: bill.feeType,
+      due: bill.amountDue,
+      paid: bill.amountPaid,
+      outstanding: bill.balance,
+      status: bill.status,
+      dueDate: bill.dueDate,
+      originalNet: bill.originalNet,
+      adjustmentTotal: bill.adjustmentTotal,
+      discountAmount: bill.discountAmount,
+    });
   }
   const monthsOut = months.map(({ dueCents, paidCents, ...m }) => ({
     ...m,
@@ -410,9 +581,9 @@ async function studentLedger(user, studentId) {
     outstanding: fromCents(Math.max(0, dueCents - paidCents)),
     status: feeMonthStatus({ amountDue: fromCents(dueCents), amountPaid: fromCents(paidCents), month: m.month }, currentMonth),
   }));
-  const due = sumCents(rows, (r) => r.getDataValue("netAmount"));
+  const due = sumCents(rows, (r) => collectibleOf(r));
   const paid = sumCents(rows, (r) => r.getDataValue("paidAmount"));
-  const owed = rows.reduce((n, r) => n + Math.max(0, cents(r.getDataValue("netAmount")) - cents(r.getDataValue("paidAmount"))), 0);
+  const owed = rows.reduce((n, r) => n + Math.max(0, cents(collectibleOf(r)) - cents(r.getDataValue("paidAmount"))), 0);
   return {
     student: {
       id: student.id,
@@ -477,7 +648,7 @@ async function allocate(actor, payment, student, manualLines, transaction, { app
 
   const openMonths = async () =>
     StudentFeeMonths.findAll({
-      where: { fkStudentId: student.id, paidAmount: { [Op.lt]: col("net_amount") } },
+      where: { fkStudentId: student.id, paidAmount: { [Op.lt]: col("collectible_amount") } },
       order: [["month", "ASC"], ["id", "ASC"]],
       lock: transaction.LOCK.UPDATE,
       transaction,
@@ -505,7 +676,7 @@ async function allocate(actor, payment, student, manualLines, transaction, { app
       {
         paidAmount: amountPaid,
         status: feeMonthStatus({
-          amountDue: month.getDataValue("netAmount"),
+          amountDue: collectibleOf(month),
           amountPaid,
           month: month.month,
         }, currentMonth),
@@ -554,7 +725,7 @@ async function recordPayment(actor, data, { dryRun = false, transaction: outer =
     const dup = await duplicateOf(actor, data.idempotencyKey);
     if (dup) return dup;
   }
-  if (data.allocations && !can(actor.role, "fees.payments.allocate_manual")) {
+  if (data.allocations && !hasPermission(actor, "fees.payments.allocate_manual")) {
     throw new ApiError(403, "Only the super admin can record an explicit allocation.");
   }
   const student = await Students.findOne({ where: { id: data.studentId, fkSchoolId: actor.schoolId } });
@@ -680,6 +851,7 @@ async function receipt(user, id, { transaction } = {}) {
   view.creditAppliedTotal = fromCents(applied.reduce((n, m) => n + cents(m.amount), 0));
   view.creditAdded = fromCents(movements.filter((m) => m.entryType === "Credit").reduce((n, m) => n + cents(m.amount), 0));
   view.creditBalance = await creditLedgerService.balance(payment.fkSchoolId, payment.fkStudentId, { transaction });
+  view.template = await settingsService.get(payment.fkSchoolId, SETTING_KEYS.RECEIPT, { transaction });
   return view;
 }
 
@@ -749,7 +921,7 @@ async function summary(actor, { month } = {}) {
     }),
     StudentFeeMonths.findOne({
       where: { fkSchoolId: actor.schoolId, month: { [Op.lte]: target } },
-      attributes: [[fn("SUM", col("net_amount")), "due"], [fn("SUM", col("paid_amount")), "paid"]],
+      attributes: [[fn("SUM", col("collectible_amount")), "due"], [fn("SUM", col("paid_amount")), "paid"]],
       raw: true,
     }),
     StudentFeeMonths.findAll({
@@ -770,7 +942,7 @@ async function summary(actor, { month } = {}) {
 /** Months fully paid up to and including `month` — used by the result gate. */
 async function isPaidThrough(schoolId, studentId, month) {
   const open = await StudentFeeMonths.count({
-    where: { fkSchoolId: schoolId, fkStudentId: studentId, month: { [Op.lte]: monthStamp(month) }, paidAmount: { [Op.lt]: col("net_amount") } },
+    where: { fkSchoolId: schoolId, fkStudentId: studentId, month: { [Op.lte]: monthStamp(month) }, paidAmount: { [Op.lt]: col("collectible_amount") } },
   });
   return open === 0;
 }
@@ -778,7 +950,7 @@ async function isPaidThrough(schoolId, studentId, month) {
 async function isMonthPaid(schoolId, studentId, month) {
   // A month can carry several bills (tuition + separately billed fees): all must be paid.
   const rows = await StudentFeeMonths.findAll({ where: { fkSchoolId: schoolId, fkStudentId: studentId, month: monthStamp(month) } });
-  return rows.length > 0 && rows.every((row) => cents(row.getDataValue("paidAmount")) >= cents(row.getDataValue("netAmount")));
+  return rows.length > 0 && rows.every((row) => cents(row.getDataValue("paidAmount")) >= cents(collectibleOf(row)));
 }
 
 /** Open the ledger through the student's admission month. Used by enrollment. */
@@ -796,10 +968,10 @@ async function balancesFor(schoolId, studentIds, currentMonth) {
   if (!studentIds.length) return new Map();
   const [rows] = await sequelize.query(
     `SELECT s.id,
-            COALESCE((SELECT SUM(GREATEST(m.net_amount - m.paid_amount, 0)) FROM student_fee_months m
+            COALESCE((SELECT SUM(GREATEST(m.collectible_amount - m.paid_amount, 0)) FROM student_fee_months m
                        WHERE m.fk_student_id = s.id AND m.archived_at IS NULL AND m.month <= :month), 0) AS outstanding,
             COALESCE((SELECT COUNT(*) FROM student_fee_months m
-                       WHERE m.fk_student_id = s.id AND m.archived_at IS NULL AND m.paid_amount < m.net_amount), 0)::int AS open_bills,
+                       WHERE m.fk_student_id = s.id AND m.archived_at IS NULL AND m.paid_amount < m.collectible_amount), 0)::int AS open_bills,
             COALESCE((SELECT SUM(CASE WHEN l.entry_type = 'Credit' THEN l.amount ELSE -l.amount END) FROM student_credit_ledger l
                        WHERE l.fk_student_id = s.id), 0) AS credit
        FROM students s WHERE s.fk_school_id = :schoolId AND s.id IN (:ids)`,
@@ -818,13 +990,13 @@ async function collectOverview(actor) {
   const [[counts]] = await sequelize.query(
     `SELECT COUNT(*)::int AS total,
             COUNT(*) FILTER (WHERE EXISTS (SELECT 1 FROM student_fee_months m WHERE m.fk_student_id = s.id AND m.archived_at IS NULL
-                                           AND m.month <= :month AND m.paid_amount < m.net_amount))::int AS outstanding
+                                           AND m.month <= :month AND m.paid_amount < m.collectible_amount))::int AS outstanding
        FROM students s WHERE s.fk_school_id = :schoolId AND s.archived_at IS NULL AND s.status = :active`,
     { replacements: { schoolId: actor.schoolId, month: currentMonth, active: STUDENT_STATUS.ACTIVE } },
   );
   const out = { date: day, totalStudents: counts.total, withOutstanding: counts.outstanding };
   const where = { fkSchoolId: actor.schoolId, paymentDate: day, status: PAYMENT_STATUS.PAID };
-  if (can(actor.role, "fees.totals")) {
+  if (hasPermission(actor, "fees.totals")) {
     const rows = await FeePayments.findAll({ where, attributes: ["amountPaid"] });
     out.todayCollection = { receipts: rows.length, amount: fromCents(sumCents(rows, (r) => r.getDataValue("amountPaid"))) };
   } else {
@@ -869,7 +1041,7 @@ async function collectContext(actor, studentId) {
   if (!student) throw new ApiError(404, "Student not found");
   const currentMonth = monthStamp(today());
   const [open, klass, creditBalance, credits, recent] = await Promise.all([
-    StudentFeeMonths.findAll({ where: { fkStudentId: student.id, paidAmount: { [Op.lt]: col("net_amount") } }, order: [["month", "ASC"], ["id", "ASC"]] }),
+    StudentFeeMonths.findAll({ where: { fkStudentId: student.id, paidAmount: { [Op.lt]: col("collectible_amount") } }, order: [["month", "ASC"], ["id", "ASC"]] }),
     student.fkClassId ? Classes.findByPk(student.fkClassId, { attributes: ["id", "label"] }) : null,
     creditLedgerService.balance(actor.schoolId, student.id),
     creditLedgerService.history(actor.schoolId, student.id),
@@ -909,4 +1081,6 @@ module.exports = {
   isPaidThrough,
   isMonthPaid,
   monthLabel,
+  monthlyFeeFor,
+  billPromotionIfConfigured,
 };

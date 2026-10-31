@@ -11,6 +11,7 @@ const can = authorize("admissions.manage");
 
 router.get("/", can, validate(v.validateList), c.list);
 router.get("/summary", can, c.summary);
+router.get("/document-checklist", can, c.documentChecklist);
 router.post("/drafts", can, validate(v.validateCreateDraft), c.createDraft);
 router.get("/:id", can, validate(v.validateId), c.getById);
 // Parents may call this too; the service limits them to their own child's files.
