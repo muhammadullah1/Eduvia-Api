@@ -120,8 +120,8 @@ Build `npm run build`, output `dist`; `vercel.json` already rewrites all paths t
    `Eduvia API listening` and no `can't start` error.
 3. Migrations run in the workflow; to check or run them by hand on the server (same `.env`):
    ```bash
-   npm run db:migrate          # applies 001–060
-   npm run db:migrate:status   # expect 60 "up", 0 "down"
+   npm run db:migrate          # applies 001–061
+   npm run db:migrate:status   # expect 61 "up", 0 "down"
    ```
 4. Seed the base school once (export the `SEED_*` vars only for this command, then unset them):
    ```bash
@@ -148,4 +148,4 @@ Build `npm run build`, output `dist`; `vercel.json` already rewrites all paths t
    (cookie sent cross-site), and sign-out clears the cookie.
 5. Upload a student photo / document, then open it: PUT to R2 succeeds (no CORS error), the presigned GET loads.
 6. Trigger a password-reset / invite email and confirm it arrives from `EMAIL_FROM` with links to `FRONT_END_URL`.
-7. `npm run db:migrate:status` still shows 60 up.
+7. `npm run db:migrate:status` still shows 61 up.

@@ -3,7 +3,9 @@
 /**
  * pm2 process file used by .github/workflows/deploy-api.yml. Settings come from the server's .env
  * (loaded by config/index.js); this file holds no secrets. Cluster mode lets `pm2 reload` restart
- * instances one at a time, so the API keeps serving during a deploy.
+ * instances one at a time, so the API keeps serving during a deploy. Several instances are safe for
+ * permissions: each request checks the school's version in `school_permission_versions` and reloads
+ * a stale cache (services/permission.service.js).
  *
  * The app name must match the PM2_APP_NAME variable of the GitHub environment.
  */

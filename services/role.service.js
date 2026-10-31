@@ -143,6 +143,7 @@ async function applyPermissions(actor, roleId, { permissions, reason, version },
     await RolePermissions.destroy({ where: { fkRoleId: locked.id }, transaction });
     await permissionService.insertGrants(locked.id, [...desired], actor.id, transaction);
     await locked.update({ version: locked.version + 1 }, { transaction });
+    await permissionService.bumpSchoolVersions([actor.schoolId], transaction);
     await auditService.record(actor, `${action} for ${locked.label}`, {
       entityType: ROLE_ENTITY,
       entityId: locked.id,

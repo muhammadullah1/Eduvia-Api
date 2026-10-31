@@ -4,6 +4,10 @@
 order, generated from the live schema with `pg_dump`) plus `060-drop-legacy-snapshot-tables.js`.
 New schema changes go here as new numbered files after 060.
 
+| Migration | Change |
+| --- | --- |
+| `061-school-permission-versions` | `school_permission_versions` (one counter per school, bumped with every role/grant change) so every API process reloads a school's permissions after a change. Applied to dev and test 2026-10-31; `down` drops the table. |
+
 Fresh environments (Stage/production): `npm run db:migrate` then the base-school seed, as in
 `docs/DEPLOYMENT-STAGE.md`.
 
